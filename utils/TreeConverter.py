@@ -20,9 +20,14 @@ class TreeConverter:
             node = BinaryNode(root.token, root.res)
             if index+1 < len(parent.children):
                 node.right_child = to_binary_helper(parent.children[index+1], parent, index+1)
+            elif eos_token:
+                node.right_child = BinaryNode(True)
             if root.children:
                 node.left_child = to_binary_helper(root.children[0], root, 0)
+            elif eos_token:
+                node.left_child = BinaryNode(True)
             return node
+            
 
         if not root:
             return None
