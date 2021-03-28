@@ -13,6 +13,12 @@ class TreePlotter:
         UniqueDotExporter(root,
                          nodeattrfunc=lambda n: f'label="{n.token}" shape={"ellipse" if n.res else "box"}'
                          ).to_picture(file_path)
+        
+    @staticmethod
+    def plot_predicted_tree(root, file_path):
+        UniqueDotExporter(root,
+                         nodeattrfunc=lambda n: f'label="{n.pred.item()}"'
+                         ).to_picture(file_path)
 
     @staticmethod
     def __binary_tree_to_plot_format(node, parent_node=None):
