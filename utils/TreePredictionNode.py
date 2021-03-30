@@ -9,11 +9,20 @@ Custom tree node for the anytree module to contain
 
 class Node(NodeMixin): 
     def __init__(self, predicted_label, parent=None, children=None):
-        super(Node, self).__init__()
+        super().__init__()
         self.pred = predicted_label
         self.parent = parent
         if children:
             self.children = children
+            
+    def get_hidden_prev_sibling(self):
+        siblings = self.parent.children
+        if siblings.index(self) > 0:
+            prev_sibling = siblings[siblings.index(self) - 1]
+            return (prev_sibling.hidden, prev_sibling.cell)
+        else:
+            return None
+        
             
     def __str__(self):
         return str(self.pred)
