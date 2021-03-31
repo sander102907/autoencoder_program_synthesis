@@ -5,26 +5,29 @@ import numpy as np
 from utils.TreePredictionNode import Node
 
 class TreeLstmDecoder(nn.Module):
-    def __init__(self, vocab_size, hidden_size, latent_size, device):
+    def __init__(self, device, params, embedding):
         super().__init__()
         
         self.device = device
         
-        self.vocab_size = vocab_size
-        self.latent_size = latent_size
+        self.vocab_size = params['VOCAB_SIZE']
+        self.latent_dim = params['LATENT_DIM']
+        self.embedding_dim = params['EMBEDDING_DIM']
+
+        self.embedding = embedding
         
-        self.lstm_parent = nn.LSTMCell(vocab_size, latent_size)
-        self.U_parent = nn.Linear(latent_size, latent_size, bias=False)
-        self.depth_pred = nn.Linear(latent_size, 1)
+        self.lstm_parent = nn.LSTMCell(params['EMBEDDING_DIM'], params['LATENT_DIM'])
+        self.U_parent = nn.Linear(params['LATENT_DIM'], params['LATENT_DIM'], bias=False)
+        self.depth_pred = nn.Linear(params['LATENT_DIM'], 1)
         
-        self.lstm_sibling = nn.LSTMCell(vocab_size, latent_size)
-        self.U_sibling = nn.Linear(latent_size, latent_size, bias=False)
-        self.width_pred = nn.Linear(latent_size, 1)
+        self.lstm_sibling = nn.LSTMCell(params['EMBEDDING_DIM'], params['LATENT_DIM'])
+        self.U_sibling = nn.Linear(params['LATENT_DIM'], params['LATENT_DIM'], bias=False)
+        self.width_pred = nn.Linear(params['LATENT_DIM'], 1)
         
-        self.label_prediction = nn.Linear(latent_size, vocab_size)
+        self.label_prediction = nn.Linear(params['LATENT_DIM'], params['VOCAB_SIZE'])
         
         self.sigmoid = nn.Sigmoid()
-        self.softmax = nn.LogSoftmax(dim=1)
+        self.softmax = nn.LogSoftmax(dim=-1)
         
         self.offset_parent = nn.Linear(1, 1, bias=False)
         self.offset_sibling = nn.Linear(1, 1, bias=False)
@@ -50,12 +53,12 @@ class TreeLstmDecoder(nn.Module):
             total_nodes = node_order.shape[0]
 
             # h and c states for every node in the batch for parent lstm
-            h_p = torch.zeros(total_nodes, self.latent_size, device=self.device)
-            c_p = torch.zeros(total_nodes, self.latent_size, device=self.device)
+            h_p = torch.zeros(total_nodes, self.latent_dim, device=self.device)
+            c_p = torch.zeros(total_nodes, self.latent_dim, device=self.device)
             
             #  h and c states for every node in the batch for sibling lstm
-            h_s = torch.zeros(total_nodes, self.latent_size, device=self.device)
-            c_s = torch.zeros(total_nodes, self.latent_size, device=self.device)
+            h_s = torch.zeros(total_nodes, self.latent_dim, device=self.device)
+            c_s = torch.zeros(total_nodes, self.latent_dim, device=self.device)
 
             for iteration in range(node_order.max() + 1):
                 self.decode_train(iteration, z, h_p, c_p, h_s, c_s, node_order, edge_order, features, adj_list, output)
@@ -65,7 +68,7 @@ class TreeLstmDecoder(nn.Module):
         
         else:
             trees = []
-            c_parent = torch.zeros(1, self.latent_size, device=self.device)
+            c_parent = torch.zeros(1, self.latent_dim, device=self.device)
             
             for index in range(z.shape[0]):
                 trees.append(self.decode_eval((z[index].unsqueeze(0), c_parent), None))
@@ -119,11 +122,12 @@ class TreeLstmDecoder(nn.Module):
 
             # Get true label value and its one hot encoding
             label = features[current_nodes_indices].long()
-            label_onehot = F.one_hot(label, self.vocab_size).float().view(-1, self.vocab_size).to(self.device)
+            # label_onehot = F.one_hot(label, self.vocab_size).float().view(-1, self.vocab_size).to(self.device)
+            emb_label = self.embedding(label).view(-1, self.embedding_dim)
             
             # Compute hidden and cell values of current nodes
-            h_parent, c_parent = self.lstm_parent(label_onehot, (h_parent, c_parent))
-            h_sibling, c_sibling = self.lstm_sibling(label_onehot, (h_prev_sibling, c_prev_sibling))
+            h_parent, c_parent = self.lstm_parent(emb_label, (h_parent, c_parent))
+            h_sibling, c_sibling = self.lstm_sibling(emb_label, (h_prev_sibling, c_prev_sibling))
             
             # Update the hidden and cell values matrices
             h_p[current_nodes_indices] = h_parent
@@ -149,8 +153,8 @@ class TreeLstmDecoder(nn.Module):
         if sibling_index == 0:
             num_first_siblings = len(first_sibling_indices)
             # Initialize to hidden, cell of siblings to zero
-            h_prev_sibling = torch.zeros(num_first_siblings, self.latent_size, device=self.device)
-            c_prev_sibling = torch.zeros(num_first_siblings, self.latent_size, device=self.device)
+            h_prev_sibling = torch.zeros(num_first_siblings, self.latent_dim, device=self.device)
+            c_prev_sibling = torch.zeros(num_first_siblings, self.latent_dim, device=self.device)
 
             if iteration == 0:
                 current_nodes_indices = torch.where(node_order == iteration)[0]
@@ -176,7 +180,7 @@ class TreeLstmDecoder(nn.Module):
         # Iteration 0: Root node, so there are no parents
         if iteration == 0:            
             h_parent = z
-            c_parent = torch.zeros(batch_size, self.latent_size, device=self.device)    
+            c_parent = torch.zeros(batch_size, self.latent_dim, device=self.device)    
         else:
             h_parent = h_p[parent_indices_siblings, :]
             c_parent = c_p[parent_indices_siblings, :]
@@ -197,8 +201,8 @@ class TreeLstmDecoder(nn.Module):
             h_prev_sibling, c_prev_sibling = sibling_state
         else:
             # Initialize to hidden, cell of siblings to zero
-            h_prev_sibling = torch.zeros(1, self.latent_size, device=self.device)
-            c_prev_sibling = torch.zeros(1, self.latent_size, device=self.device)
+            h_prev_sibling = torch.zeros(1, self.latent_dim, device=self.device)
+            c_prev_sibling = torch.zeros(1, self.latent_dim, device=self.device)
             
             
         h_pred = torch.tanh(self.U_parent(h_parent) + self.U_sibling(h_prev_sibling))
@@ -229,12 +233,13 @@ class TreeLstmDecoder(nn.Module):
             node = Node(torch.argmax(predicted_label, dim=-1), parent=parent_node)
                     
         # Take argmax of predicted label and transform to onehot
-        predicted_label = F.one_hot(torch.argmax(predicted_label, dim=-1), self.vocab_size).float().view(-1, self.vocab_size).to(self.device)
+        # predicted_label = F.one_hot(torch.argmax(predicted_label, dim=-1), self.vocab_size).float().view(-1, self.vocab_size).to(self.device)
+        emb_label = self.embedding(torch.agmax(predicted_label, dim=-1)).view(-1, self.embedding_dim)
                     
         # If we predict a next sibling
         if has_sibling:
             # Calculate next hidden sibling state
-            sibling_state = self.lstm_sibling(predicted_label, (h_prev_sibling, c_prev_sibling))
+            sibling_state = self.lstm_sibling(emb_label, (h_prev_sibling, c_prev_sibling))
             
             # Pass the same parent state, but updated sibling state
             self.decode_eval(parent_state, sibling_state, parent_node)
@@ -245,7 +250,7 @@ class TreeLstmDecoder(nn.Module):
         # If we predict we are a parent, continue with children
         if is_parent:
             # update parent state and parent_node of tree
-            parent_state = self.lstm_parent(predicted_label, parent_state)
+            parent_state = self.lstm_parent(emb_label, parent_state)
             
             # Pass new parent state and no sibling state as we start with the first sibling
             self.decode_eval(parent_state, None, parent_node)
