@@ -2,6 +2,10 @@ import os
 from datetime import datetime
 from tqdm import tqdm
 import torch
+from torch import optim
+import torch.nn as nn
+from models.TreeLstmEncoder import TreeLstmEncoder
+from models.TreeLstmDecoder import TreeLstmDecoder
 
 class Vae():
     """
@@ -9,7 +13,19 @@ class Vae():
     Can also be used to easily save and load models
     """
     
-    def __init__(self, encoder, decoder, encoder_optimizer, decoder_optimizer, loss_function, vocab_size, device):
+    def __init__(self, device, params, loss_function):
+        self.vocab_size = params['VOCAB_SIZE']
+        self.clip = params['CLIP']
+        
+        # Shared embedding layer for encoder and decoder
+        self.embedding = nn.Embedding(self.vocab_size, params['EMBEDDING_DIM'])
+
+        encoder = TreeLstmEncoder(device, params, self.embedding)
+        decoder = TreeLstmDecoder(device, params, self.embedding)
+
+        encoder_optimizer = optim.Adam(encoder.parameters(), lr=params['LEARNING_RATE'])
+        decoder_optimizer = optim.Adam(decoder.parameters(), lr=params['LEARNING_RATE'])
+        
         self.encoder = encoder.to(device)
         self.decoder = decoder.to(device)
         
@@ -22,7 +38,6 @@ class Vae():
         # Store losses -> so we can easily save them
         self.losses = {}
         
-        self.vocab_size = vocab_size
         self.device = device
         
     def train(self, data_loader, epochs, save_dir=None):
@@ -62,7 +77,9 @@ class Vae():
                 output = self.decoder(z, batch)
 
                 curr_losses = self.loss_function(output, z_mean, z_log_var, self.vocab_size)
-                curr_losses['total_loss'].backward() 
+                curr_losses['total_loss'].backward()
+                torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.clip)
+                torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), self.clip)
                 self.encoder_optimizer.step()
                 self.decoder_optimizer.step()
 

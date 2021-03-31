@@ -16,8 +16,9 @@ class TreeVaeLoss(nn.Module):
     Total loss = kl_loss + reconstruction_loss
     """
     
-    def __init__(self):
+    def __init__(self, kl_weight):
         super().__init__()
+        self.kl_weight = kl_weight
 
     def forward(self, output, mu, log_var, vocab_size): 
         # Negative log likelihood loss (categorical cross entropy)
@@ -31,7 +32,7 @@ class TreeVaeLoss(nn.Module):
         
         kl_loss = 0.5 * torch.sum(log_var.exp() - log_var - 1 + mu.pow(2))
         
-        total_loss = kl_loss + reconstruction_loss
+        total_loss = self.kl_weight * kl_loss + reconstruction_loss
         
         losses = {
             'total_loss': total_loss,

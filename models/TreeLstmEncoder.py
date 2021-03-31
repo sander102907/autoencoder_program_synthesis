@@ -3,18 +3,18 @@ import torch.nn as nn
 from treelstm import TreeLSTM
 
 class TreeLstmEncoder(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_size, latent_size, device):
+    def __init__(self, device, params, embedding):
         super().__init__() 
         
         self.device = device
                 
-        self.hidden_size = hidden_size
-        self.embedding_dim = embedding_dim
+        self.hidden_size = params['HIDDEN_SIZE']
+        self.embedding_dim = params['EMBEDDING_DIM']
         
-        self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.tree_lstm = TreeLSTM(embedding_dim, hidden_size)
-        self.z_mean = nn.Linear(hidden_size, latent_size)
-        self.z_log_var = nn.Linear(hidden_size, latent_size)
+        self.embedding = embedding
+        self.tree_lstm = TreeLSTM(params['EMBEDDING_DIM'], params['HIDDEN_SIZE'])
+        self.z_mean = nn.Linear(params['HIDDEN_SIZE'], params['LATENT_DIM'])
+        self.z_log_var = nn.Linear(params['HIDDEN_SIZE'], params['LATENT_DIM'])
         
     def forward(self, inp):
         batch_size = len(inp['tree_sizes'])
