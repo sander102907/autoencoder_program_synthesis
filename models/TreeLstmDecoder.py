@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from utils.TreePredictionNode import Node
+from utils.TreeNode import Node
 
 class TreeLstmDecoder(nn.Module):
     def __init__(self, device, params, embedding):
@@ -228,13 +228,13 @@ class TreeLstmDecoder(nn.Module):
         
         # Build tree: Add node to tree
         if parent_node is None:
-            node = Node(torch.argmax(predicted_label, dim=-1), parent=None)
+            node = Node(torch.argmax(predicted_label, dim=-1).item(), is_reserved=True, parent=None)
         else:
-            node = Node(torch.argmax(predicted_label, dim=-1), parent=parent_node)
+            node = Node(torch.argmax(predicted_label, dim=-1).item(), is_reserved=True, parent=parent_node)
                     
         # Take argmax of predicted label and transform to onehot
         # predicted_label = F.one_hot(torch.argmax(predicted_label, dim=-1), self.vocab_size).float().view(-1, self.vocab_size).to(self.device)
-        emb_label = self.embedding(torch.agmax(predicted_label, dim=-1)).view(-1, self.embedding_dim)
+        emb_label = self.embedding(torch.argmax(predicted_label, dim=-1)).view(-1, self.embedding_dim)
                     
         # If we predict a next sibling
         if has_sibling:

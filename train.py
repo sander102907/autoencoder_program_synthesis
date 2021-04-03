@@ -16,13 +16,13 @@ csv.field_size_limit(sys.maxsize)
 params = {
     'EMBEDDING_DIM': 30,
     'HIDDEN_SIZE': 512,
-    'LATENT_DIM': 256,
+    'LATENT_DIM': 512,
     'LEARNING_RATE': 0.005,
     'EPOCHS': 10,
     'BATCH_SIZE': 32,
     'NUM_WORKERS': 8,
     'CLIP': 5,
-    'KL_LOSS_WEIGHT': 0.1,
+    'KL_LOSS_WEIGHT': 10,
 }
 
 
@@ -33,10 +33,11 @@ def train(dataset_path, reserved_tokens_path):
 
     # To JSON format (dictionary)
     reserved_tokens = json.loads(json_data)
+    label_to_idx = {k:i for i, k in enumerate(reserved_tokens.keys())}
     vocab_size = len(reserved_tokens)
     params['VOCAB_SIZE'] = vocab_size
 
-    ast_dataset = AstDataset(dataset_path, vocab_size=vocab_size, max_tree_size=-1)
+    ast_dataset = AstDataset(dataset_path, vocab_size=vocab_size, label_to_idx=label_to_idx, max_tree_size=300)
 
     loader = DataLoader(ast_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
     
@@ -52,6 +53,8 @@ def train(dataset_path, reserved_tokens_path):
     
 
 if __name__ == "__main__":
-    reserved_tokens_path = '../data/ast_trees_200k/reserved_tokens.json'
-    dataset_path = '../data/ast_trees_200k/asts.csv'
+    #reserved_tokens_path = '../data/ast_trees_200k/reserved_tokens.json'
+    #dataset_path = '../data/ast_trees_200k/asts.csv'
+    reserved_tokens_path = '../data/ast_trees_solutions600/reserved_tokens_0.json'
+    dataset_path = '../data/ast_trees_solutions600/asts/asts0.csv.bz2'
     train(dataset_path, reserved_tokens_path)

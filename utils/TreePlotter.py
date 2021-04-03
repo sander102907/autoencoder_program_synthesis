@@ -6,18 +6,18 @@ Utility to plot n_ary and binary trees to png photo.
 """
 class TreePlotter:
     @staticmethod
-    def plot_tree(root, file_path, binary=False):
+    def plot_tree(root, file_path, label_dict=None, binary=False):
         if binary:
             root = TreePlotter.__binary_tree_to_plot_format(root)
 
         UniqueDotExporter(root,
-                         nodeattrfunc=lambda n: f'label="{n.token}" shape={"ellipse" if n.res else "box"}'
+                         nodeattrfunc=lambda n: f'label="{n.token if label_dict is None else label_dict[n.token]}" shape={"ellipse" if n.res else "box"}'
                          ).to_picture(file_path)
         
     @staticmethod
     def plot_predicted_tree(root, file_path):
         UniqueDotExporter(root,
-                         nodeattrfunc=lambda n: f'label="{n.pred.item()}"'
+                         nodeattrfunc=lambda n: f'label="{n.pred}"'
                          ).to_picture(file_path)
 
     @staticmethod

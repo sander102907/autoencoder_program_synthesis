@@ -6,6 +6,7 @@ from torch import optim
 import torch.nn as nn
 from models.TreeLstmEncoder import TreeLstmEncoder
 from models.TreeLstmDecoder import TreeLstmDecoder
+from time import time
 
 class Vae():
     """
@@ -20,14 +21,11 @@ class Vae():
         # Shared embedding layer for encoder and decoder
         self.embedding = nn.Embedding(self.vocab_size, params['EMBEDDING_DIM'])
 
-        encoder = TreeLstmEncoder(device, params, self.embedding)
-        decoder = TreeLstmDecoder(device, params, self.embedding)
+        self.encoder = TreeLstmEncoder(device, params, self.embedding).to(device)
+        self.decoder = TreeLstmDecoder(device, params, self.embedding).to(device)
 
-        encoder_optimizer = optim.Adam(encoder.parameters(), lr=params['LEARNING_RATE'])
-        decoder_optimizer = optim.Adam(decoder.parameters(), lr=params['LEARNING_RATE'])
-        
-        self.encoder = encoder.to(device)
-        self.decoder = decoder.to(device)
+        encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=params['LEARNING_RATE'])
+        decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=params['LEARNING_RATE'])
         
         self.encoder_optimizer = encoder_optimizer
         self.decoder_optimizer = decoder_optimizer
@@ -64,8 +62,9 @@ class Vae():
             
             for loss_type in loss_types:
                 running_losses[loss_type] = 0
-                
+            
             for batch_index, batch in enumerate(data_loader):
+                print(sum(batch['tree_sizes']))
                 self.encoder_optimizer.zero_grad()
                 self.decoder_optimizer.zero_grad()
 
@@ -97,6 +96,7 @@ class Vae():
                     for loss_type in loss_types:
                         self.losses[loss_type][f'epoch{epoch + 1}-batch{batch_index + 1}'] = running_losses[loss_type] / save_loss_per_num_batches 
                     running_losses[loss_type] = 0
+                    
                         
             if save_dir is not None:
                 self.save_model(os.path.join(save_dir, f'VAE_epoch{epoch}_{datetime.now().strftime("%d-%m-%Y_%H:%M")}.tar'))
@@ -104,25 +104,24 @@ class Vae():
         return losses
         
         
-    def evaluate(self, data_loader):
+    def evaluate(self, batch):
         """
         Evaluates the VAE model: given data, reconstruct the input and output this
         @param data_loader: Torch Dataset that generates batches to evaluate on
         """
         
-        encoder.eval()
-        decoder.eval()
+        self.encoder.eval()
+        self.decoder.eval()
         
         reconstructions = []
         
         with torch.no_grad():
-            for batch in data_loader:
-                for key in batch.keys():
-                    if key != 'tree_sizes':
-                        batch[key] = batch[key].to(device)
+            for key in batch.keys():
+                if key != 'tree_sizes':
+                    batch[key] = batch[key].to(self.device)
 
-                z, _, _ = self.encoder(batch)
-                reconstructions += self.decoder(z)
+            z, _, _ = self.encoder(batch)
+            reconstructions += self.decoder(z)
                 
         return reconstructions
             
@@ -134,10 +133,10 @@ class Vae():
         @param z: latent vector(s) -> (batch_size, latent_size)
         """
         
-        decoder.eval()
+        self.decoder.eval()
         
         with torch.no_grad():
-            output = decoder(z)
+            output = self.decoder(z)
             
         return output
     
