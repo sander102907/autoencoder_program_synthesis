@@ -9,8 +9,6 @@ from datasets.AstDataset import AstDataset
 from utils.TreeLstmUtils import batch_tree_input
 from models.Vae import Vae
 from loss_functions.TreeVaeLoss import TreeVaeLoss, TreeVaeLossComplete
-from torchsummary import summary
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 csv.field_size_limit(sys.maxsize)
 
@@ -22,7 +20,7 @@ params = {
     'LATENT_DIM': 512,
     'LEARNING_RATE': 0.005,
     'EPOCHS': 10,
-    'BATCH_SIZE': 16,
+    'BATCH_SIZE': 8,
     'NUM_WORKERS': 8,
     'CLIP': 5,
     'KL_LOSS_WEIGHT': 0.001,
@@ -78,12 +76,12 @@ def train(dataset_path, tokens_paths=None, tokenized=False):
             
     non_res_tokens = len(tokens_paths) > 1
     
-    ast_dataset = AstDataset(dataset_path, label_to_idx, max_tree_size=200, remove_non_res=not non_res_tokens)
+    ast_dataset = AstDataset(dataset_path, label_to_idx, max_tree_size=-1, remove_non_res=not non_res_tokens)
 
     loader = DataLoader(ast_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
     
     # set model
-    vae = Vae(device, params, vae_loss, non_res_tokens)
+    vae = Vae(device, params)
         
     # Train
     vae.train(loader, params['EPOCHS'], save_dir='checkpoints/')
