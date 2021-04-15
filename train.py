@@ -1,3 +1,4 @@
+import os
 import json
 import csv
 import torch
@@ -7,54 +8,93 @@ sys.path.append("utils/")
 from datasets.AstDataset import AstDataset
 from utils.TreeLstmUtils import batch_tree_input
 from models.Vae import Vae
-from loss_functions.TreeVaeLoss import TreeVaeLoss
+from loss_functions.TreeVaeLoss import TreeVaeLoss, TreeVaeLossComplete
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 csv.field_size_limit(sys.maxsize)
 
 # HYPERPARAMETERS
 params = {
+    'LEAF_EMBEDDING_DIM': 100,
     'EMBEDDING_DIM': 30,
     'HIDDEN_SIZE': 512,
     'LATENT_DIM': 512,
     'LEARNING_RATE': 0.005,
     'EPOCHS': 10,
-    'BATCH_SIZE': 32,
-    'NUM_WORKERS': 8,
+    'BATCH_SIZE': 1,
+    'NUM_WORKERS': 0,
     'CLIP': 5,
-    'KL_LOSS_WEIGHT': 10,
+    'KL_LOSS_WEIGHT': 0.001,
 }
 
+def load_token_vocabulary(path):
+    if os.path.isfile(path):
+        # Load the reserved tokens dictionary
+        with open(path, 'r') as json_f:
+            json_data = json_f.read()
 
-def train(dataset_path, reserved_tokens_path):
-    # Load the reserved tokens dictionary
-    with open(reserved_tokens_path, 'r') as json_f:
-        json_data = json_f.read()
+        # To JSON format (dictionary)
+        tokens = json.loads(json_data)
 
-    # To JSON format (dictionary)
-    reserved_tokens = json.loads(json_data)
-    label_to_idx = {k:i for i, k in enumerate(reserved_tokens.keys())}
-    vocab_size = len(reserved_tokens)
-    params['VOCAB_SIZE'] = vocab_size
+    else:
+        tokens = {}
 
-    ast_dataset = AstDataset(dataset_path, vocab_size=vocab_size, label_to_idx=label_to_idx, max_tree_size=300)
+        for dirpath, _, files in os.walk(path):
+            for file in files:
+                if file.endswith('.json'):
+                    with open(os.path.join(dirpath, file), 'r') as json_f:
+                        json_data = json_f.read()
+
+                    # To JSON format (dictionary)
+                    for k,v in json.loads(json_data).items():
+                            if k in tokens:
+                                tokens[k] += v
+                            else:
+                                tokens[k] = v
+
+    return tokens
+
+
+def train(dataset_path, tokens_paths=None, tokenized=False):
+    token_vocabs = {}
+    label_to_idx = None
+    
+    for k, path in tokens_paths.items():
+        token_vocabs[k] = load_token_vocabulary(path)
+        params[f'{k}_VOCAB_SIZE'] = len(token_vocabs[k])
+        
+    if len(tokens_paths) > 1:
+        # Load loss
+        vae_loss = TreeVaeLossComplete(params['KL_LOSS_WEIGHT'])
+    else:       
+        vae_loss = TreeVaeLoss(params['KL_LOSS_WEIGHT'])
+            
+    
+    if not tokenized:
+        label_to_idx = {}
+        for k, vocab in token_vocabs.items():
+            label_to_idx[k] = {k:i for i, k in enumerate(vocab.keys())}
+            
+    non_res_tokens = len(tokens_paths) > 1
+    
+    ast_dataset = AstDataset(dataset_path, label_to_idx, max_tree_size=200, remove_non_res=not non_res_tokens)
 
     loader = DataLoader(ast_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
     
-    
-    # Load loss
-    vae_loss = TreeVaeLoss(params['KL_LOSS_WEIGHT'])
-    
     # set model
-    vae = Vae(device, params, vae_loss)
-    
+    vae = Vae(device, params, vae_loss, non_res_tokens)
+        
     # Train
     vae.train(loader, params['EPOCHS'], save_dir='checkpoints/')
     
 
 if __name__ == "__main__":
-    #reserved_tokens_path = '../data/ast_trees_200k/reserved_tokens.json'
-    #dataset_path = '../data/ast_trees_200k/asts.csv'
-    reserved_tokens_path = '../data/ast_trees_solutions600/reserved_tokens_0.json'
-    dataset_path = '../data/ast_trees_solutions600/asts/asts0.csv.bz2'
-    train(dataset_path, reserved_tokens_path)
+    tokens_paths = {
+        'RES': '../data/ast_trees/reserved_tokens.json',
+        'NAME': '../data/ast_trees/name_tokens.json',
+        'TYPE': '../data/ast_trees/type_tokens.json',
+        'LITERAL': '../data/ast_trees/literal_tokens.json',
+    }
+    dataset_path = '../data/ast_trees/asts.csv.bz2'
+
+    train(dataset_path, tokens_paths)

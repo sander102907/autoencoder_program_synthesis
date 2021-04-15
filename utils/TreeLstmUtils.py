@@ -69,6 +69,7 @@ def batch_tree_input(batch):
     batched_node_order_topdown = torch.cat([b['node_order_topdown'] for b in batch])
     batched_edge_order_bottomup = torch.cat([b['edge_order_bottomup'] for b in batch])
     batched_edge_order_topdown = torch.cat([b['edge_order_topdown'] for b in batch])
+    batched_vocabs = np.concatenate([b['vocabs'] for b in batch])
 
     batched_adjacency_list = []
     offset = 0
@@ -85,4 +86,5 @@ def batch_tree_input(batch):
         'edge_order_topdown': batched_edge_order_topdown,
         'adjacency_list': batched_adjacency_list,
         'tree_sizes': tree_sizes,
+        'vocabs': batched_vocabs
     }
