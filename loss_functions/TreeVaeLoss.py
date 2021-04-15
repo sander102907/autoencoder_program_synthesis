@@ -68,6 +68,7 @@ class TreeVaeLossComplete(nn.Module):
         for k, loss in output.items():
             if 'predicted_labels' in k:
                 label_losses[k.split('_')[0] + '_loss'] = F.nll_loss(output[k], output[k.replace('_predicted', '')].long())
+                print(k, output[k].shape, output[k.replace('_predicted', '')].long().shape, output[k])
 
 
         # Negative log likelihood loss (categorical cross entropy)

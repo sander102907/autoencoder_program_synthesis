@@ -20,6 +20,7 @@ class Vae():
         self.res_vocab_size = params['RES_VOCAB_SIZE']
         self.clip = params['CLIP']
         self.non_res_tokens = non_res_tokens
+        self.params = params
 
         self.embedding_layers = nn.ModuleDict({})
 
@@ -97,32 +98,34 @@ class Vae():
                     if key not in  ['tree_sizes', 'vocabs']:
                         batch[key] = batch[key].to(self.device)
 
-                z, z_mean, z_log_var = self.encoder(batch)
-                output = self.decoder(z, batch)
+                z, kl_loss = self.encoder(batch)
+                reconstruction_loss = self.decoder(z, batch)
+                loss = kl_loss * self.params['KL_LOSS_WEIGHT'] + reconstruction_loss
+                loss.backward()
 
-                curr_losses = self.loss_function(output, z_mean, z_log_var)
-                curr_losses['total_loss'].backward()
+                # curr_losses = self.loss_function(output, z_mean, z_log_var)
+                # curr_losses['total_loss'].backward()
                 torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.clip)
                 torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), self.clip)
                 self.encoder_optimizer.step()
                 self.decoder_optimizer.step()
 
-                pbar.set_postfix({k:v.item() if k == 'total_loss' else v for k,v in curr_losses.items()})
+                pbar.set_postfix({'loss':loss.item(), 'kl_loss':kl_loss.item(), 'recon_loss':reconstruction_loss.item()})
                 pbar.update()
                 
                 
-                for loss_type in loss_types:
-                    if loss_type == 'total_loss':
-                        running_losses[loss_type] += curr_losses[loss_type].item()
-                    else:
-                        running_losses[loss_type] += curr_losses[loss_type]
+                # for loss_type in loss_types:
+                #     if loss_type == 'total_loss':
+                #         running_losses[loss_type] += curr_losses[loss_type].item()
+                #     else:
+                #         running_losses[loss_type] += curr_losses[loss_type]
                 
               
                 # Add losses every "save_loss_per_num_batches"
-                if batch_index % save_loss_per_num_batches == save_loss_per_num_batches - 1:
-                    for loss_type in loss_types:
-                        self.losses[loss_type][f'epoch{epoch + 1}-batch{batch_index + 1}'] = running_losses[loss_type] / save_loss_per_num_batches 
-                        running_losses[loss_type] = 0
+                # if batch_index % save_loss_per_num_batches == save_loss_per_num_batches - 1:
+                #     for loss_type in loss_types:
+                #         self.losses[loss_type][f'epoch{epoch + 1}-batch{batch_index + 1}'] = running_losses[loss_type] / save_loss_per_num_batches 
+                #         running_losses[loss_type] = 0
                     
 #                 break
                     
