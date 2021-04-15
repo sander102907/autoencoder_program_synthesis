@@ -56,6 +56,8 @@ class TreeLstmEncoderComplete(nn.Module):
         # hidden roots: (batch_size, hidden_size)
         hidden_roots = torch.zeros(batch_size, self.hidden_size, device=self.device)
         
+        # TODO GET hidden cell as well, and concat with hidden state such that we have 2 * LATENT DIM so decoder can be initialized with hidden cell as well
+
         # Offset to check in hidden state, start at zero, increase by tree size each time
         # Example: hidden  [1, 3, 5, 1, 5, 2] and tree_sizes = [4, 2] we want hidden[0] and hidden[4] -> 1, 5
         offset = 0

@@ -16,10 +16,9 @@ class Vae():
     Can also be used to easily save and load models
     """
     
-    def __init__(self, device, params, loss_function, non_res_tokens=True):
+    def __init__(self, device, params):
         self.res_vocab_size = params['RES_VOCAB_SIZE']
         self.clip = params['CLIP']
-        self.non_res_tokens = non_res_tokens
         self.params = params
 
         self.embedding_layers = nn.ModuleDict({})
@@ -55,7 +54,7 @@ class Vae():
         self.decoder_optimizer = decoder_optimizer
         
         # loss function
-        self.loss_function = loss_function
+        # self.loss_function = loss_function
         
         # Store losses -> so we can easily save them
         self.losses = {}
@@ -85,7 +84,7 @@ class Vae():
             self.losses[loss_type] = {}
         
         for epoch in range(epochs):
-            pbar = tqdm(unit='batch', position=0)
+            pbar = tqdm(unit='batch')
             
             for loss_type in loss_types:
                 running_losses[loss_type] = 0
@@ -103,8 +102,6 @@ class Vae():
                 loss = kl_loss * self.params['KL_LOSS_WEIGHT'] + reconstruction_loss
                 loss.backward()
 
-                # curr_losses = self.loss_function(output, z_mean, z_log_var)
-                # curr_losses['total_loss'].backward()
                 torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.clip)
                 torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), self.clip)
                 self.encoder_optimizer.step()
@@ -136,7 +133,7 @@ class Vae():
         return self.losses
         
         
-    def evaluate(self, batch):
+    def evaluate(self, batch, idx_to_label):
         """
         Evaluates the VAE model: given data, reconstruct the input and output this
         @param data_loader: Torch Dataset that generates batches to evaluate on
@@ -149,17 +146,17 @@ class Vae():
         
         with torch.no_grad():
             for key in batch.keys():
-                if key != 'tree_sizes':
+                if key not in  ['tree_sizes', 'vocabs']:
                     batch[key] = batch[key].to(self.device)
 
-            z, _, _ = self.encoder(batch)
-            reconstructions += self.decoder(z)
+            z, _ = self.encoder(batch)
+            reconstructions += self.decoder(z, target=None, idx_to_label=idx_to_label)
                 
         return reconstructions
             
         
         
-    def generate(self, z):
+    def generate(self, z, idx_to_label):
         """
         Generate using the VAE model: given latent vector(s) z, generate output
         @param z: latent vector(s) -> (batch_size, latent_size)
@@ -168,7 +165,7 @@ class Vae():
         self.decoder.eval()
         
         with torch.no_grad():
-            output = self.decoder(z)
+            output = self.decoder(z, target=None, idx_to_label=idx_to_label)
             
         return output
     
