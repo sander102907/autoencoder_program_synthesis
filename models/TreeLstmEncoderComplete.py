@@ -69,9 +69,11 @@ class TreeLstmEncoderComplete(nn.Module):
         
         # Parameterization trick
         z = self.reparameterize(z_mean, z_log_var)
+
+        kl_loss = 0.5 * torch.sum(z_log_var.exp() - z_log_var - 1 + z_mean.pow(2))
         
         # Return latent vector, and mean and variance
-        return z, z_mean, z_log_var
+        return z, kl_loss
         
         
     def reparameterize(self, mu, log_var):

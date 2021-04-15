@@ -9,6 +9,7 @@ from datasets.AstDataset import AstDataset
 from utils.TreeLstmUtils import batch_tree_input
 from models.Vae import Vae
 from loss_functions.TreeVaeLoss import TreeVaeLoss, TreeVaeLossComplete
+from torchsummary import summary
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 csv.field_size_limit(sys.maxsize)
@@ -21,8 +22,8 @@ params = {
     'LATENT_DIM': 512,
     'LEARNING_RATE': 0.005,
     'EPOCHS': 10,
-    'BATCH_SIZE': 1,
-    'NUM_WORKERS': 0,
+    'BATCH_SIZE': 16,
+    'NUM_WORKERS': 8,
     'CLIP': 5,
     'KL_LOSS_WEIGHT': 0.001,
 }
