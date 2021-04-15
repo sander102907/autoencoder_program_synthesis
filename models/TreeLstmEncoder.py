@@ -9,10 +9,10 @@ class TreeLstmEncoder(nn.Module):
         self.device = device
                 
         self.hidden_size = params['HIDDEN_SIZE']
-        self.embedding_dim = params['EMBEDDING_DIM']
+        self.embedding_dim = params['RES_EMBEDDING_DIM']
         
         self.embedding = embedding
-        self.tree_lstm = TreeLSTM(params['EMBEDDING_DIM'], params['HIDDEN_SIZE'])
+        self.tree_lstm = TreeLSTM(params['RES_EMBEDDING_DIM'], params['HIDDEN_SIZE'])
         self.z_mean = nn.Linear(params['HIDDEN_SIZE'], params['LATENT_DIM'])
         self.z_log_var = nn.Linear(params['HIDDEN_SIZE'], params['LATENT_DIM'])
         

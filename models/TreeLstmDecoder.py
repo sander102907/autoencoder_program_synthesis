@@ -10,21 +10,21 @@ class TreeLstmDecoder(nn.Module):
         
         self.device = device
         
-        self.vocab_size = params['VOCAB_SIZE']
+        self.vocab_size = params['RES_VOCAB_SIZE']
         self.latent_dim = params['LATENT_DIM']
-        self.embedding_dim = params['EMBEDDING_DIM']
+        self.embedding_dim = params['RES_EMBEDDING_DIM']
 
         self.embedding = embedding
         
-        self.lstm_parent = nn.LSTMCell(params['EMBEDDING_DIM'], params['LATENT_DIM'])
+        self.lstm_parent = nn.LSTMCell(params['RES_EMBEDDING_DIM'], params['LATENT_DIM'])
         self.U_parent = nn.Linear(params['LATENT_DIM'], params['LATENT_DIM'], bias=False)
         self.depth_pred = nn.Linear(params['LATENT_DIM'], 1)
         
-        self.lstm_sibling = nn.LSTMCell(params['EMBEDDING_DIM'], params['LATENT_DIM'])
+        self.lstm_sibling = nn.LSTMCell(params['RES_EMBEDDING_DIM'], params['LATENT_DIM'])
         self.U_sibling = nn.Linear(params['LATENT_DIM'], params['LATENT_DIM'], bias=False)
         self.width_pred = nn.Linear(params['LATENT_DIM'], 1)
         
-        self.label_prediction = nn.Linear(params['LATENT_DIM'], params['VOCAB_SIZE'])
+        self.label_prediction = nn.Linear(params['LATENT_DIM'], params['RES_VOCAB_SIZE'])
         
         self.sigmoid = nn.Sigmoid()
         self.softmax = nn.LogSoftmax(dim=-1)
@@ -230,7 +230,7 @@ class TreeLstmDecoder(nn.Module):
         if parent_node is None:
             node = Node(torch.argmax(predicted_label, dim=-1).item(), is_reserved=True, parent=None)
         else:
-            node = Node(torch.argmax(predicted_label, dim=-1).item(), is_reserved=True, parent=parent_node)
+            node = Node(torch.argmax(predicted_label, dim=-1).item(), is_reserved=True if is_parent else False, parent=parent_node)
                     
         # Take argmax of predicted label and transform to onehot
         # predicted_label = F.one_hot(torch.argmax(predicted_label, dim=-1), self.vocab_size).float().view(-1, self.vocab_size).to(self.device)

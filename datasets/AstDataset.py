@@ -12,10 +12,10 @@ import math
 class AstDataset(IterableDataset):
     "AST trees dataset"
     
-    def __init__(self, data_path, vocab_size, label_to_idx=None, max_tree_size=-1):
-        self.vocab_size = vocab_size
+    def __init__(self, data_path, label_to_idx, max_tree_size=-1, remove_non_res=False):
         self.max_tree_size = max_tree_size
         self.label_to_idx = label_to_idx
+        self.remove_non_res = remove_non_res
         
         if os.path.isfile(data_path):
             self.file_paths = [data_path]
@@ -45,14 +45,14 @@ class AstDataset(IterableDataset):
                 print(f'{worker_id}: {file_path}\n')
                 # Create CSV file iterator
                 if file_path.endswith('.bz2'):
-                    file_iterator = BZ2_CSV_LineReader(file_path).read_csv()
+                    file_iterator = Bz2CsvLineReader(file_path).read_csv()
                 else:
                     file_iterator = csv.reader(open(file_path))
+
                 # To skip the header, call next so the iterator starts from the first line
                 next(file_iterator)
                 
                 for ast in file_iterator:
-                    # print(ast[0])
                     tree, nodes = self.preprocess(ast)
                     if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
                         yield tree 
@@ -62,7 +62,7 @@ class AstDataset(IterableDataset):
             if math.floor(worker_id / workers_per_shared_file) == file_index:
                 # Create CSV file iterator
                 if file_path.endswith('.bz2'):
-                    file_iterator = BZ2_CSV_LineReader(file_path).read_csv()
+                    file_iterator = Bz2CsvLineReader(file_path).read_csv()
                 else:
                     file_iterator = csv.reader(open(file_path))
                 # To skip the header, call next so the iterator starts from the first line
@@ -73,10 +73,6 @@ class AstDataset(IterableDataset):
                     # To avoid duplicate data, each worker reads unique lines from the dataset
                     # e.g. 4 workers -> worker 0 reads lines 0, 4, 8 and worker 1 reads lines 1, 5, 9 etc...
                     # This is not optimal but certainly a speed up compared to just using 1 worker for each file
-#                     worker ids [1, 2, 3] [4, 5, 6] [7, 8, 9]
-#                     file ids   [0         4         7]
-                    
-#                     rows       [0, 1, 2] [0, 1 ,2] [0, 1, 2]
                     if worker_id - (file_index * workers_per_shared_file) == i % workers_per_shared_file:
                         tree, nodes = self.preprocess(ast)
                         if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
@@ -86,8 +82,9 @@ class AstDataset(IterableDataset):
     def preprocess(self, ast):
         # load the JSON of the tree
         tree = json.loads(ast[1])
-        # Remove the non-reserved keyword nodes
-        nodes = self.remove_non_res_nodes(tree)
+
+        # Get the amount of nodes
+        nodes = self.get_amt_nodes(tree)
         
         if nodes > 1:
             tree = self.convert_tree_to_tensors(tree)
@@ -96,12 +93,14 @@ class AstDataset(IterableDataset):
             
         return tree, nodes
         
-    def remove_non_res_nodes(self, root, nodes=0):
+    def get_amt_nodes(self, root, nodes=0):
         if 'children' in root:
             to_remove = []
             for child in root['children']:
-                if child['res']: 
-                    nodes += self.remove_non_res_nodes(child)
+                if not child['res'] and 'children' in child and not self.remove_non_res:
+                    to_remove.append(child)
+                if child['res'] or not self.remove_non_res:
+                    nodes += self.get_amt_nodes(child)
                 else:
                     to_remove.append(child)
 
@@ -120,17 +119,39 @@ class AstDataset(IterableDataset):
         return n
 
 
-    def _gather_node_attributes(self, node, key):
+    def _gather_node_attributes(self, node, key, parent=None):
         if self.label_to_idx is not None:
-            feature = self.label_to_idx[node[key]]
+            if node['res']:
+                feature = self.label_to_idx['RES'][node[key]]
+                vocab = 'RES'
+            else:
+                if 'LITERAL' in self.label_to_idx.keys() and 'LITERAL' in parent['token']:
+                    feature = self.label_to_idx['LITERAL'][node[key]]
+                    vocab = 'LITERAL'
+                elif 'TYPE' in self.label_to_idx.keys() and 'TYPE' == parent['token']:
+                    feature = self.label_to_idx['TYPE'][node[key]]
+                    vocab = 'TYPE'
+                elif 'NAME' in self.label_to_idx.keys():
+                    feature = self.label_to_idx['NAME'][node[key]]
+                    vocab = 'NAME'
+                else:
+                    feature = self.label_to_idx['NON_RES'][node[key]]
+                    vocab = 'NON_RES'
         else:
-            feature = node[key]
-            
+            feature = node[key]      
+            vocab = ''          
+
         features = [[torch.tensor([feature])]]
+        vocabs = [vocab]
         if 'children' in node:
             for child in node['children']:
-                features.extend(self._gather_node_attributes(child, key))
-        return features
+                feature, vocab = self._gather_node_attributes(child, key, node) 
+                features.extend(feature)
+                vocabs += vocab
+                # vocabs.extend(vocab)
+
+        # print(vocabs)
+        return features, vocabs
 
 
     def _gather_adjacency_list(self, node):
@@ -147,24 +168,26 @@ class AstDataset(IterableDataset):
         # This modifies the original tree as a side effect
         self._label_node_index(tree)
 
-        features = self._gather_node_attributes(tree, 'token')
+        features, vocabs = self._gather_node_attributes(tree, 'token')
         adjacency_list = self._gather_adjacency_list(tree)
+
         
         node_order_bottomup, edge_order_bottomup = calculate_evaluation_orders(adjacency_list, len(features))
         node_order_topdown, edge_order_topdown = calculate_evaluation_orders_topdown(adjacency_list, len(features))
 
         return {
-            'features': torch.tensor(features, dtype=torch.float32),
-            'node_order_bottomup': torch.tensor(node_order_bottomup, dtype=torch.int64),
-            'node_order_topdown': torch.tensor(node_order_topdown, dtype=torch.int64),
+            'features': torch.tensor(features, dtype=torch.int32),
+            'node_order_bottomup': torch.tensor(node_order_bottomup, dtype=torch.int32),
+            'node_order_topdown': torch.tensor(node_order_topdown, dtype=torch.int32),
             'adjacency_list': torch.tensor(adjacency_list, dtype=torch.int64),
-            'edge_order_bottomup': torch.tensor(edge_order_bottomup, dtype=torch.int64),
-            'edge_order_topdown': torch.tensor(edge_order_topdown, dtype=torch.int64),
+            'edge_order_bottomup': torch.tensor(edge_order_bottomup, dtype=torch.int32),
+            'edge_order_topdown': torch.tensor(edge_order_topdown, dtype=torch.int32),
+            'vocabs': vocabs
         }
     
     
     
-class BZ2_CSV_LineReader():
+class Bz2CsvLineReader():
     """Line reader to read bz2 compressed CSV file line by line, helpful for the iterable dataset"""
     def __init__(self, filename):
         self.filename = filename
