@@ -12,19 +12,18 @@ class TreePlotter:
             root = TreePlotter.__binary_tree_to_plot_format(root)
             
         def get_label(node):
-            if node.res and res_label_dict is not None:
+#             if node.res and res_label_dict is not None:
 #                 print(f'label={res_label_dict[node.token]}')
 #                 print(re.findall(r'^[a-zA-Z0-9=_]*', f'label={res_label_dict[node.token]}')[0].replace("_", "x"))
 #                 return re.findall(r'^[a-zA-Z0-9=]*', f'label={res_label_dict[node.token]}')[0].replace("_", "x")
-                return f'label={res_label_dict[node.token]}'
+#                 return f'label={res_label_dict[node.token]}'
 #             elif not node.res and label_dict is not None:
 # #                 print(f'label={label_dict[node.token]}')
 # #                 print(re.findall(r'^[a-zA-Z0-9=]*', f'label={label_dict[node.token]}')[0])
 #                 print(re.findall(r'^[a-zA-Z0-9=]*', f'label={label_dict[node.token]}')[0])
 #                 return re.findall(r'^[a-z0-9=]*', f'label={label_dict[node.token]}')[0]
-            else:
-                print(node.token)
-                return f'label={node.token}'
+#             else:
+            return f'label={node.token}'
 
         UniqueDotExporter(root,
                          nodeattrfunc=get_label #lambda n: f'label="{get_label(n)}" shape={"ellipse" if n.res else "box"}'

@@ -18,8 +18,8 @@ class TreeLstmEncoderComplete(nn.Module):
             if not 'RES' in k:
                 self.leaf_lstms[k] = nn.LSTMCell(params['LEAF_EMBEDDING_DIM'], params['HIDDEN_SIZE'])
 
-        self.z_mean = nn.Linear(params['HIDDEN_SIZE'], params['LATENT_DIM'])
-        self.z_log_var = nn.Linear(params['HIDDEN_SIZE'], params['LATENT_DIM'])
+        self.z_mean = nn.Linear(2 * params['HIDDEN_SIZE'], 2 * params['LATENT_DIM'])
+        self.z_log_var = nn.Linear(2 * params['HIDDEN_SIZE'], 2 * params['LATENT_DIM'])
         
     def forward(self, inp):
         batch_size = len(inp['tree_sizes'])
@@ -52,9 +52,9 @@ class TreeLstmEncoderComplete(nn.Module):
                                       c)
         
         
-        # Take hidden states of roots of trees only -> tree lstm produces hidden states for all nodes in all trees as list
-        # hidden roots: (batch_size, hidden_size)
-        hidden_roots = torch.zeros(batch_size, self.hidden_size, device=self.device)
+        # Take hidden states and cell states of roots of trees only -> tree lstm produces hidden states for all nodes in all trees as list
+        # hidden roots: (batch_size, hidden_size * 2)
+        hidden_roots = torch.zeros(batch_size, self.hidden_size * 2, device=self.device)
         
         # TODO GET hidden cell as well, and concat with hidden state such that we have 2 * LATENT DIM so decoder can be initialized with hidden cell as well
 
@@ -62,7 +62,7 @@ class TreeLstmEncoderComplete(nn.Module):
         # Example: hidden  [1, 3, 5, 1, 5, 2] and tree_sizes = [4, 2] we want hidden[0] and hidden[4] -> 1, 5
         offset = 0
         for i in range(len(inp['tree_sizes'])):
-            hidden_roots[i] = hidden[offset]
+            hidden_roots[i] = torch.cat([hidden[offset], cell[offset]])
             offset += inp['tree_sizes'][i]
 
         # Get z_mean and z_log_var from hidden (parent roots only)

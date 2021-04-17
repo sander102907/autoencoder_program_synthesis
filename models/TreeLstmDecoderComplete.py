@@ -44,6 +44,12 @@ class TreeLstmDecoderComplete(nn.Module):
         
         
     def forward(self, z, target=None, idx_to_label=None):
+        """
+        @param z: (batch_size, LATENT_DIM * 2) -> latent vector which is 2 * LATENT DIM as it contains latent vector for both hidden and cell state of LSTM
+        @param target: dictionary containing tree information -> node_order_topdown, edge_order_topdown, features, adjacency_list and vocabs
+        @param idx_to_label: dictionary containing mapping from ids to labels
+        """
+
         # We are training and we can do teacher forcing and batch processing
         if target is not None:   
             # Keep track of the loss   
@@ -75,11 +81,10 @@ class TreeLstmDecoderComplete(nn.Module):
         
         # We are evaluating and we cannot use training forcing and we generate tree by tree
         elif idx_to_label is not None:
-            trees = []
-            c_parent = torch.zeros(1, self.latent_dim, device=self.device)
-            
+            trees = []            
             for index in range(z.shape[0]):
-                trees.append(self.decode_eval((z[index].unsqueeze(0), c_parent), None, idx_to_label))
+                h_parent, c_parent = torch.split(z[index], int(len(z[index])/2))
+                trees.append(self.decode_eval((h_parent.unsqueeze(0), c_parent.unsqueeze(0)), None, idx_to_label))
                 
             return trees
 
@@ -208,9 +213,10 @@ class TreeLstmDecoderComplete(nn.Module):
             current_nodes_indices = current_indices[[ind + 1 for ind in indices]]
 
         # Iteration 0: Root node, so there are no parents
-        if iteration == 0:            
-            h_parent = z
-            c_parent = torch.zeros(batch_size, self.latent_dim, device=self.device)    
+        if iteration == 0:
+            h_parent, c_parent = torch.split(z, int(z.shape[-1]/2), dim=-1)        
+            # h_parent = z
+            # c_parent = torch.zeros(batch_size, self.latent_dim, device=self.device)    
         else:
             h_parent = h_p[parent_indices_siblings, :]
             c_parent = c_p[parent_indices_siblings, :]
