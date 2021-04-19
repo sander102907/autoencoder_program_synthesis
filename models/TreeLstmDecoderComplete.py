@@ -16,6 +16,7 @@ class TreeLstmDecoderComplete(nn.Module):
         self.embedding_layers = embedding_layers
         self.leaf_lstms_sibling = nn.ModuleDict({})
         self.prediction_layers = nn.ModuleDict({})
+        self.cross_ent_losses = nn.ModuleDict({}) 
 
         
         self.lstm_parent = nn.LSTMCell(params['EMBEDDING_DIM'], params['LATENT_DIM'])
@@ -31,12 +32,12 @@ class TreeLstmDecoderComplete(nn.Module):
             if not 'RES' in k:
                 self.leaf_lstms_sibling[k] = nn.LSTMCell(params['LEAF_EMBEDDING_DIM'], params['HIDDEN_SIZE'])
             self.prediction_layers[k] = nn.Linear(params['LATENT_DIM'], params[f'{k}_VOCAB_SIZE'])
+            self.cross_ent_losses[k] = nn.CrossEntropyLoss(weight=params[f'{k}_WEIGHTS'], reduction='sum')
 
         
         self.sigmoid = nn.Sigmoid()
         self.softmax = nn.LogSoftmax(dim=-1)
 
-        self.cross_ent_loss = nn.CrossEntropyLoss(reduction='sum')
         self.bce_loss = nn.BCEWithLogitsLoss(reduction='sum')
         
         self.offset_parent = nn.Linear(1, 1, bias=False)
@@ -53,14 +54,17 @@ class TreeLstmDecoderComplete(nn.Module):
         # We are training and we can do teacher forcing and batch processing
         if target is not None:   
             # Keep track of the loss   
-            loss = 0
+            total_loss = 0
+            individual_losses = {}
+            accuracies = {}
+            loss_types = list(self.embedding_layers.keys()) + ['PARENT', 'SIBLING']
+            
 
-            # Get needed input data
+            for loss_type in loss_types:
+                individual_losses[loss_type] = 0
+                accuracies[loss_type] = 0
+
             node_order = target['node_order_topdown']
-            edge_order = target['edge_order_topdown']
-            features = target['features']
-            adj_list = target['adjacency_list']
-            vocabs = target['vocabs']
 
             # Total number of nodes of all trees in the batch
             total_nodes = node_order.shape[0]
@@ -75,9 +79,17 @@ class TreeLstmDecoderComplete(nn.Module):
 
             # Iterate over the levels of the tree -> top down
             for iteration in range(node_order.max() + 1):
-                loss += self.decode_train(iteration, z, h_p, c_p, h_s, c_s, node_order, edge_order, features, adj_list, vocabs)
+                total_loss += self.decode_train(iteration, z, h_p, c_p, h_s, c_s, target, individual_losses, accuracies)
+
+
+            for loss_type in loss_types:
+                if loss_type in ['PARENT', 'SIBLING']:
+                    individual_losses[loss_type] = individual_losses[loss_type] / total_nodes
+                else:
+                    individual_losses[loss_type] = individual_losses[loss_type] / sum(target['vocabs'] == loss_type)
+                accuracies[loss_type] = (accuracies[loss_type]/ total_nodes).item()
             
-            return loss / total_nodes
+            return total_loss / total_nodes, individual_losses, accuracies
         
         # We are evaluating and we cannot use training forcing and we generate tree by tree
         elif idx_to_label is not None:
@@ -89,9 +101,16 @@ class TreeLstmDecoderComplete(nn.Module):
             return trees
 
             
-    def decode_train(self, iteration, z, h_p, c_p, h_s, c_s, node_order, edge_order, features, adj_list, vocabs):
+    def decode_train(self, iteration, z, h_p, c_p, h_s, c_s, target, individual_losses, accuracies):
         batch_size = z.shape[0]
         loss = 0
+
+        # Get needed input data
+        node_order = target['node_order_topdown']
+        edge_order = target['edge_order_topdown']
+        features = target['features']
+        adj_list = target['adjacency_list']
+        vocabs = target['vocabs']
         
         # At iteration 0, we are at the root
         if iteration == 0:
@@ -125,8 +144,14 @@ class TreeLstmDecoderComplete(nn.Module):
             h_pred = torch.tanh(self.U_parent(h_parent) + self.U_sibling(h_prev_sibling))
 
             # Calculate parent and sibling loss
-            loss += self.bce_loss(self.depth_pred(h_pred), is_parent)
-            loss += self.bce_loss(self.width_pred(h_pred), has_sibling)
+            parent_loss = self.bce_loss(self.depth_pred(h_pred), is_parent)
+            sibling_loss = self.bce_loss(self.width_pred(h_pred), has_sibling)
+
+            loss += parent_loss + sibling_loss
+            individual_losses['PARENT'] += parent_loss.item()
+            individual_losses['SIBLING'] += sibling_loss.item()
+            accuracies['PARENT'] += sum((self.sigmoid(self.depth_pred(h_pred)) >= 0.5) == (is_parent == 1))
+            accuracies['SIBLING'] += sum((self.sigmoid(self.width_pred(h_pred)) >= 0.5) == (has_sibling == 1))
 
             # Get true label values
             label = features[current_nodes_indices].long()
@@ -141,9 +166,16 @@ class TreeLstmDecoderComplete(nn.Module):
                     label_pred = prediction_layer(h_pred[vocabs_mask == k])
 
                     # Calculate cross entropy loss of label prediction
-                    loss += self.cross_ent_loss((label_pred 
+                    label_loss = self.cross_ent_losses[k]((label_pred 
                         + self.offset_parent(is_parent[vocabs_mask == k]) 
-                        + self.offset_sibling(has_sibling[vocabs_mask == k])), label[vocabs_mask == k].view(-1))
+                        + self.offset_sibling(has_sibling[vocabs_mask == k])), label[vocabs_mask == k].view(-1))  
+
+
+                    loss += label_loss
+                    individual_losses[k] += label_loss.item()
+                    accuracies[k] += sum(torch.argmax(self.softmax(label_pred 
+                        + self.offset_parent(is_parent[vocabs_mask == k]) 
+                        + self.offset_sibling(has_sibling[vocabs_mask == k])), dim=-1) == label[vocabs_mask == k].view(-1))
 
                     # Calculate embedding of true label -> teacher forcing
                     if 'RES' in k:
@@ -180,10 +212,7 @@ class TreeLstmDecoderComplete(nn.Module):
 
           
     def get_hidden_values(self, iteration, adj_list, edge_order, h_p, c_p, h_s, c_s, sibling_index,
-                          first_sibling_indices, current_indices, node_order, parent_indices, vocabs, z):
-        
-        batch_size = z.shape[0]
-        
+                          first_sibling_indices, current_indices, node_order, parent_indices, vocabs, z):        
         # At sibling index 0, there should not be any previous siblings
         if sibling_index == 0:
             num_first_siblings = len(first_sibling_indices)
@@ -214,9 +243,7 @@ class TreeLstmDecoderComplete(nn.Module):
 
         # Iteration 0: Root node, so there are no parents
         if iteration == 0:
-            h_parent, c_parent = torch.split(z, int(z.shape[-1]/2), dim=-1)        
-            # h_parent = z
-            # c_parent = torch.zeros(batch_size, self.latent_dim, device=self.device)    
+            h_parent, c_parent = torch.split(z, int(z.shape[-1]/2), dim=-1)  
         else:
             h_parent = h_p[parent_indices_siblings, :]
             c_parent = c_p[parent_indices_siblings, :]
