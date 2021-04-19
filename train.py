@@ -18,9 +18,9 @@ params = {
     'EMBEDDING_DIM': 30,
     'HIDDEN_SIZE': 800,
     'LATENT_DIM': 800,
-    'LEARNING_RATE': 0.005,
+    'LEARNING_RATE': 1e-4,
     'EPOCHS': 10,
-    'BATCH_SIZE': 4,
+    'BATCH_SIZE': 3,
     'NUM_WORKERS': 8,
     'CLIP': 5,
     'KL_LOSS_WEIGHT': 0.001,
@@ -61,6 +61,8 @@ def train(dataset_path, tokens_paths=None, tokenized=False):
     for k, path in tokens_paths.items():
         token_vocabs[k] = load_token_vocabulary(path)
         params[f'{k}_VOCAB_SIZE'] = len(token_vocabs[k])
+        loss_weights = 1 / torch.tensor(list(token_vocabs[k].values()))
+        params[f'{k}_WEIGHTS'] = loss_weights / torch.sum(loss_weights) * len(token_vocabs[k])
 
         
     if len(tokens_paths) > 1:
@@ -78,6 +80,7 @@ def train(dataset_path, tokens_paths=None, tokenized=False):
             # Write token vocab to file to use with AST to Code
             with open(f'output/{k}_tokens.json', 'w') as f:
                 f.write(json.dumps(label_to_idx[k]))
+
             
     non_res_tokens = len(tokens_paths) > 1
     

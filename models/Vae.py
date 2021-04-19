@@ -73,15 +73,9 @@ class Vae():
         self.decoder.train()
         
         save_loss_per_num_batches = 1
-        loss_types = ['total_loss', 'sibling_loss', 'kl_loss']
-
-        for k in self.embedding_layers.keys():
-            loss_types.append(k + '_loss')
         
         running_losses = {}
-
-        for loss_type in loss_types:
-            self.losses[loss_type] = {}
+        loss_types = list(self.embedding_layers.keys()) + ['PARENT', 'SIBLING', 'KL']
         
         for epoch in range(epochs):
             pbar = tqdm(unit='batch')
@@ -98,8 +92,8 @@ class Vae():
                         batch[key] = batch[key].to(self.device)
 
                 z, kl_loss = self.encoder(batch)
-                reconstruction_loss = self.decoder(z, batch)
-                loss = kl_loss * self.params['KL_LOSS_WEIGHT'] + reconstruction_loss
+                reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch)
+                loss = kl_loss * (epoch/epochs) + reconstruction_loss
                 loss.backward()
 
                 torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.clip)
@@ -107,15 +101,14 @@ class Vae():
                 self.encoder_optimizer.step()
                 self.decoder_optimizer.step()
 
-                pbar.set_postfix({'loss':loss.item(), 'kl_loss':kl_loss.item(), 'recon_loss':reconstruction_loss.item()})
+                pbar.set_postfix({'loss':loss.item(), 'kl_loss':kl_loss.item(), 'recon_loss':reconstruction_loss.item(), 'kl weight':0.002 * batch_index, 'acc_parent':accuracies['PARENT'], 'acc_sibling':accuracies['SIBLING'], 'acc_RES':accuracies['RES'], 'acc_NAME':accuracies['NAME'], 'acc_TYPE':accuracies['TYPE'], 'acc_LIT': accuracies['LITERAL']})
                 pbar.update()
                 
                 
-                # for loss_type in loss_types:
-                #     if loss_type == 'total_loss':
-                #         running_losses[loss_type] += curr_losses[loss_type].item()
-                #     else:
-                #         running_losses[loss_type] += curr_losses[loss_type]
+                for loss_type in individual_losses.keys():
+                    running_losses[loss_type] += individual_losses[loss_type]
+
+                running_losses['KL'] += kl_loss
                 
               
                 # Add losses every "save_loss_per_num_batches"
@@ -123,6 +116,7 @@ class Vae():
                 #     for loss_type in loss_types:
                 #         self.losses[loss_type][f'epoch{epoch + 1}-batch{batch_index + 1}'] = running_losses[loss_type] / save_loss_per_num_batches 
                 #         running_losses[loss_type] = 0
+            print(running_losses)
                     
 #                 break
                     
