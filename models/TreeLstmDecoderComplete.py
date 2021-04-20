@@ -29,7 +29,7 @@ class TreeLstmDecoderComplete(nn.Module):
 
         # Leaf lstms and prediction layers
         for k, embedding_layer in embedding_layers.items():
-            if not 'RES' in k:
+            if not 'RES' in k and params['INDIV_LAYERS_VOCABS']:
                 self.leaf_lstms_sibling[k] = nn.LSTMCell(params['LEAF_EMBEDDING_DIM'], params['HIDDEN_SIZE'])
             self.prediction_layers[k] = nn.Linear(params['LATENT_DIM'], params[f'{k}_VOCAB_SIZE'])
             self.cross_ent_losses[k] = nn.CrossEntropyLoss(weight=params[f'{k}_WEIGHTS'], reduction='sum')
@@ -77,10 +77,15 @@ class TreeLstmDecoderComplete(nn.Module):
             h_s = torch.zeros(total_nodes, self.latent_dim, device=self.device)
             c_s = torch.zeros(total_nodes, self.latent_dim, device=self.device)
 
+            total_time = 0
+
             # Iterate over the levels of the tree -> top down
             for iteration in range(node_order.max() + 1):
-                total_loss += self.decode_train(iteration, z, h_p, c_p, h_s, c_s, target, individual_losses, accuracies)
+                loss, time = self.decode_train(iteration, z, h_p, c_p, h_s, c_s, target, individual_losses, accuracies)
+                total_loss += loss
+                total_time += time
 
+            print(total_time)
 
             for loss_type in loss_types:
                 if loss_type in ['PARENT', 'SIBLING']:
@@ -134,6 +139,7 @@ class TreeLstmDecoderComplete(nn.Module):
 
         # Iterate over sibling indices, start with first sibling, then move to next as we need the hidden state of the previous sibling
         # For the next sibling
+        total_time = 0
         for sibling_index in range(largest_num_siblings):
             h_parent, c_parent, h_prev_sibling, c_prev_sibling, is_parent, has_sibling, current_nodes_indices, vocabs_mask = \
                                                                             self.get_hidden_values(iteration, adj_list, edge_order, h_p, c_p, h_s, c_s,
@@ -157,19 +163,18 @@ class TreeLstmDecoderComplete(nn.Module):
             label = features[current_nodes_indices].long()
 
             # print(sibling_index, h_parent.shape, h_pred.shape, label.shape, vocabs_mask.shape)
-
             # Iterate over possible node types and predict labels for each node type
             for k, prediction_layer in self.prediction_layers.items():
                 # Only do actual calculations when the amount of nodes for this node type > 0
                 if len(h_pred[vocabs_mask == k]) > 0:
                     # Get label predictions
+                    
                     label_pred = prediction_layer(h_pred[vocabs_mask == k])
-
+                    
                     # Calculate cross entropy loss of label prediction
                     label_loss = self.cross_ent_losses[k]((label_pred 
                         + self.offset_parent(is_parent[vocabs_mask == k]) 
                         + self.offset_sibling(has_sibling[vocabs_mask == k])), label[vocabs_mask == k].view(-1))  
-
 
                     loss += label_loss
                     individual_losses[k] += label_loss.item()
@@ -178,7 +183,7 @@ class TreeLstmDecoderComplete(nn.Module):
                         + self.offset_sibling(has_sibling[vocabs_mask == k])), dim=-1) == label[vocabs_mask == k].view(-1))
 
                     # Calculate embedding of true label -> teacher forcing
-                    if 'RES' in k:
+                    if 'RES' in k or not self.params['INDIV_LAYERS_VOCABS']:
                         embedding_dim = self.params['EMBEDDING_DIM']
                     else:
                         embedding_dim = self.params['LEAF_EMBEDDING_DIM']
@@ -199,16 +204,19 @@ class TreeLstmDecoderComplete(nn.Module):
 
                     else:
                         # Compute hidden and cell values of current nodes for previous siblings only (since we are not parents in the leafs)
-                        h, c = self.leaf_lstms_sibling[k](
-                            emb_label,
-                            (h_prev_sibling[vocabs_mask == k],
-                            c_prev_sibling[vocabs_mask == k]))
+                        if self.params['INDIV_LAYERS_VOCABS']:
+                            h, c = self.leaf_lstms_sibling[k](
+                                emb_label,
+                                (h_prev_sibling[vocabs_mask == k],
+                                c_prev_sibling[vocabs_mask == k]))
+                        else:
+                            h, c = self.lstm_sibling(emb_label, (h_prev_sibling[vocabs_mask == k], c_prev_sibling[vocabs_mask == k]))
 
                         # Update hidden and cell values matrices for siblings only (leafs cannot be parents)
                         h_s[current_nodes_indices[vocabs_mask == k]] = h
                         c_s[current_nodes_indices[vocabs_mask == k]] = c
         
-        return loss
+        return loss, total_time
 
           
     def get_hidden_values(self, iteration, adj_list, edge_order, h_p, c_p, h_s, c_s, sibling_index,

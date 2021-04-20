@@ -15,15 +15,17 @@ csv.field_size_limit(sys.maxsize)
 # HYPERPARAMETERS
 params = {
     'LEAF_EMBEDDING_DIM': 100,
-    'EMBEDDING_DIM': 30,
+    'EMBEDDING_DIM': 200,
     'HIDDEN_SIZE': 800,
     'LATENT_DIM': 800,
     'LEARNING_RATE': 1e-4,
-    'EPOCHS': 10,
-    'BATCH_SIZE': 3,
+    'EPOCHS': 30,
+    'BATCH_SIZE': 64,
     'NUM_WORKERS': 8,
     'CLIP': 5,
     'KL_LOSS_WEIGHT': 0.001,
+    'WEIGHTED_LOSS': False,         # Whether to weight the loss: with imbalanced vocabularies to how often the tokens occur
+    'INDIV_LAYERS_VOCABS': False    # Whether to use individual LSTM layers for each of the different vocabularies
 }
 
 def load_token_vocabulary(path):
@@ -61,15 +63,12 @@ def train(dataset_path, tokens_paths=None, tokenized=False):
     for k, path in tokens_paths.items():
         token_vocabs[k] = load_token_vocabulary(path)
         params[f'{k}_VOCAB_SIZE'] = len(token_vocabs[k])
-        loss_weights = 1 / torch.tensor(list(token_vocabs[k].values()))
-        params[f'{k}_WEIGHTS'] = loss_weights / torch.sum(loss_weights) * len(token_vocabs[k])
 
-        
-    if len(tokens_paths) > 1:
-        # Load loss
-        vae_loss = TreeVaeLossComplete(params['KL_LOSS_WEIGHT'])
-    else:       
-        vae_loss = TreeVaeLoss(params['KL_LOSS_WEIGHT'])
+        if params['WEIGHTED_LOSS']:
+            loss_weights = 1 / torch.tensor(list(token_vocabs[k].values()))
+            params[f'{k}_WEIGHTS'] = loss_weights / torch.sum(loss_weights) * len(token_vocabs[k])
+        else:
+            params[f'{k}_WEIGHTS'] = torch.ones(len(token_vocabs[k]))
             
     
     if not tokenized:
@@ -90,9 +89,18 @@ def train(dataset_path, tokens_paths=None, tokenized=False):
     
     # set model
     vae = Vae(device, params)
+
+    save_dir = 'checkpoints/' \
+                + f'{params["LATENT_DIM"]}latent' \
+                + f'_{params["HIDDEN_SIZE"]}hidden' \
+                + '_weightedloss' if params['WEIGHTED_LOSS'] else '' \
+                + '_indivlayers' if params['INDIV_LAYERS_VOCABS'] else '' \
+                + '/'
+
+    os.makedirs(save_dir, exist_ok=True)
         
     # Train
-    vae.train(loader, params['EPOCHS'], save_dir='checkpoints/')
+    vae.train(loader, params['EPOCHS'], save_dir=save_dir)
     
 
 if __name__ == "__main__":
