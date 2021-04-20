@@ -105,11 +105,11 @@ def train(dataset_path, tokens_paths=None, tokenized=False):
 
 if __name__ == "__main__":
     tokens_paths = {
-        'RES': '../data/ast_trees/reserved_tokens.json',
-        'NAME': '../data/ast_trees/name_tokens.json',
-        'TYPE': '../data/ast_trees/type_tokens.json',
-        'LITERAL': '../data/ast_trees/literal_tokens.json',
+        'RES': '../data/ast_trees_new/reserved_tokens.json',
+        'NAME': '../data/ast_trees_new/name_tokens.json',
+        'TYPE': '../data/ast_trees_new/type_tokens.json',
+        'LITERAL': '../data/ast_trees_new/literal_tokens.json',
     }
-    dataset_path = '../data/ast_trees/asts.csv.bz2'
+    dataset_path = '../data/ast_trees_new/asts.csv.bz2'
 
     train(dataset_path, tokens_paths)
