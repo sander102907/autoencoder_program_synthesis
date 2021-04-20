@@ -90,12 +90,9 @@ def train(dataset_path, tokens_paths=None, tokenized=False):
     # set model
     vae = Vae(device, params)
 
-    save_dir = 'checkpoints/' \
-                + f'{params["LATENT_DIM"]}latent' \
-                + f'_{params["HIDDEN_SIZE"]}hidden' \
-                + '_weightedloss' if params['WEIGHTED_LOSS'] else '' \
-                + '_indivlayers' if params['INDIV_LAYERS_VOCABS'] else '' \
-                + '/'
+    save_dir = 'checkpoints/' + f'{params["LATENT_DIM"]}latent' + f'_{params["HIDDEN_SIZE"]}hidden' + f'{"_weightedloss" if params["WEIGHTED_LOSS"] else ""}' + f'{"_indivlayers" if params["INDIV_LAYERS_VOCABS"] else ""}' + '/'
+
+    
 
     os.makedirs(save_dir, exist_ok=True)
         
@@ -105,11 +102,11 @@ def train(dataset_path, tokens_paths=None, tokenized=False):
 
 if __name__ == "__main__":
     tokens_paths = {
-        'RES': '../data/ast_trees_new/reserved_tokens.json',
-        'NAME': '../data/ast_trees_new/name_tokens.json',
-        'TYPE': '../data/ast_trees_new/type_tokens.json',
-        'LITERAL': '../data/ast_trees_new/literal_tokens.json',
+        'RES': '../data/ast_trees/reserved_tokens.json',
+        'NAME': '../data/ast_trees/name_tokens.json',
+        'TYPE': '../data/ast_trees/type_tokens.json',
+        'LITERAL': '../data/ast_trees/literal_tokens.json',
     }
-    dataset_path = '../data/ast_trees_new/asts.csv.bz2'
+    dataset_path = '../data/ast_trees/asts.csv.bz2'
 
     train(dataset_path, tokens_paths)
