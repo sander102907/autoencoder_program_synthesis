@@ -94,7 +94,7 @@ class Vae():
 
                 z, kl_loss = self.encoder(batch)
                 reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch)
-                loss = kl_loss * (epoch/epochs) + reconstruction_loss
+                loss = kl_loss * (epoch/(epochs - 1)) + reconstruction_loss
                 loss.backward()
 
                 torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.clip)
@@ -102,7 +102,7 @@ class Vae():
                 self.encoder_optimizer.step()
                 self.decoder_optimizer.step()
 
-                pbar.set_postfix({'loss':loss.item(), 'kl_loss':kl_loss.item(), 'recon_loss':reconstruction_loss.item(), 'kl weight':0.002 * batch_index, 'acc_parent':accuracies['PARENT'], 'acc_sibling':accuracies['SIBLING'], 'acc_RES':accuracies['RES'], 'acc_NAME':accuracies['NAME'], 'acc_TYPE':accuracies['TYPE'], 'acc_LIT': accuracies['LITERAL']})
+                pbar.set_postfix({'loss':loss.item(), 'kl_loss':kl_loss.item(), 'recon_loss':reconstruction_loss.item(), 'kl weight':(epoch/(epochs - 1)), 'acc_parent':accuracies['PARENT'], 'acc_sibling':accuracies['SIBLING'], 'acc_RES':accuracies['RES'], 'acc_NAME':accuracies['NAME'], 'acc_TYPE':accuracies['TYPE'], 'acc_LIT': accuracies['LITERAL']})
                 pbar.update()
                 
                 
