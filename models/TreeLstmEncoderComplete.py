@@ -14,9 +14,10 @@ class TreeLstmEncoderComplete(nn.Module):
         self.tree_lstm = TreeLSTM(params['EMBEDDING_DIM'], params['HIDDEN_SIZE'])
         self.leaf_lstms = nn.ModuleDict({})
 
-        for k, embedding_layer in embedding_layers.items():
-            if not 'RES' in k:
-                self.leaf_lstms[k] = nn.LSTMCell(params['LEAF_EMBEDDING_DIM'], params['HIDDEN_SIZE'])
+        if params['INDIV_LAYERS_VOCABS']:
+            for k, embedding_layer in embedding_layers.items():
+                if not 'RES' in k:
+                    self.leaf_lstms[k] = nn.LSTMCell(params['LEAF_EMBEDDING_DIM'], params['HIDDEN_SIZE'])
 
         self.z_mean = nn.Linear(2 * params['HIDDEN_SIZE'], 2 * params['LATENT_DIM'])
         self.z_log_var = nn.Linear(2 * params['HIDDEN_SIZE'], 2 * params['LATENT_DIM'])
@@ -33,23 +34,30 @@ class TreeLstmEncoderComplete(nn.Module):
         c = torch.zeros(node_order.shape[0], self.hidden_size, device=self.device)
         
         for k, embedding_layer in self.embedding_layers.items():
-            if 'RES' in k:
+            if self.params['INDIV_LAYERS_VOCABS']:
+                if 'RES' in k:
+                    features_vocab = embedding_layer(inp['features'][vocabs == k].long()).view(-1, self.params['EMBEDDING_DIM'])
+                    features[vocabs == k] = features_vocab
+
+                else:
+                    features_vocab = embedding_layer(inp['features'][vocabs == k].long()).view(-1, self.params['LEAF_EMBEDDING_DIM'])
+                    h_vocab, c_vocab = self.leaf_lstms[k](features_vocab)
+                    h[vocabs == k] = h_vocab
+                    c[vocabs == k] = c_vocab
+            else:
                 features_vocab = embedding_layer(inp['features'][vocabs == k].long()).view(-1, self.params['EMBEDDING_DIM'])
                 features[vocabs == k] = features_vocab
 
-            else:
-                features_vocab = embedding_layer(inp['features'][vocabs == k].long()).view(-1, self.params['LEAF_EMBEDDING_DIM'])
-                h_vocab, c_vocab = self.leaf_lstms[k](features_vocab)
-                h[vocabs == k] = h_vocab
-                c[vocabs == k] = c_vocab
-        
+        # Tree LSTM can start from bottom nodes (iteration 0) if 1 LSTM is used, if individual leaf LSTMS are used, start at iteration 1
+        start_iteration = 1 if self.params['INDIV_LAYERS_VOCABS'] else 0
 
         hidden, cell = self.tree_lstm(features,
                                       node_order,
                                       adj_list,
                                       edge_order,
                                       h,
-                                      c)
+                                      c,
+                                      start_iteration)
         
         
         # Take hidden states and cell states of roots of trees only -> tree lstm produces hidden states for all nodes in all trees as list

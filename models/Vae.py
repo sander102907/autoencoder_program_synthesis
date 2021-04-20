@@ -26,14 +26,15 @@ class Vae():
         # Create shared embedding layers based on vocab sizes we give
         for k, v in params.items():
             if 'VOCAB_SIZE' in k:
-                # For reserved tokens
-                if 'RES' in k:
+                # For reserved tokens or if not individual layers for vocabs
+                if 'RES' in k or not params['INDIV_LAYERS_VOCABS']:
                     embbedding_size = params['EMBEDDING_DIM']
                 # For leaf tokens
                 else:
                     embbedding_size = params['LEAF_EMBEDDING_DIM']
 
                 self.embedding_layers[k.split('_')[0]] = nn.Embedding(params[k], embbedding_size)
+
 
 
         # If we are using leaf tokens as well, se the complete encoder and decoder models
