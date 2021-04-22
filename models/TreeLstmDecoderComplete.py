@@ -77,24 +77,22 @@ class TreeLstmDecoderComplete(nn.Module):
             h_s = torch.zeros(total_nodes, self.latent_dim, device=self.device)
             c_s = torch.zeros(total_nodes, self.latent_dim, device=self.device)
 
-            total_time = 0
-
             # Iterate over the levels of the tree -> top down
             for iteration in range(node_order.max() + 1):
-                loss, time = self.decode_train(iteration, z, h_p, c_p, h_s, c_s, target, individual_losses, accuracies)
+                loss = self.decode_train(iteration, z, h_p, c_p, h_s, c_s, target, individual_losses, accuracies)
                 total_loss += loss
-                total_time += time
-
-            print(total_time)
 
             for loss_type in loss_types:
                 if loss_type in ['PARENT', 'SIBLING']:
-                    individual_losses[loss_type] = individual_losses[loss_type] / total_nodes
+                    accuracies[loss_type] = (accuracies[loss_type]/ total_nodes).item()
                 else:
-                    individual_losses[loss_type] = individual_losses[loss_type] / sum(target['vocabs'] == loss_type)
-                accuracies[loss_type] = (accuracies[loss_type]/ total_nodes).item()
+                    accuracies[loss_type] = (accuracies[loss_type]/ sum(target['vocabs'] == loss_type)).item()
+                #     individual_losses[loss_type] = individual_losses[loss_type] / total_nodes
+                # else:
+                #     individual_losses[loss_type] = individual_losses[loss_type] / sum(target['vocabs'] == loss_type)
+                # accuracies[loss_type] = (accuracies[loss_type]/ sum(target['vocabs'] == loss_type)).item()
             
-            return total_loss / total_nodes, individual_losses, accuracies
+            return total_loss, individual_losses, accuracies
         
         # We are evaluating and we cannot use training forcing and we generate tree by tree
         elif idx_to_label is not None:
@@ -116,6 +114,7 @@ class TreeLstmDecoderComplete(nn.Module):
         features = target['features']
         adj_list = target['adjacency_list']
         vocabs = target['vocabs']
+        total_nodes = node_order.shape[0]
         
         # At iteration 0, we are at the root
         if iteration == 0:
@@ -139,7 +138,6 @@ class TreeLstmDecoderComplete(nn.Module):
 
         # Iterate over sibling indices, start with first sibling, then move to next as we need the hidden state of the previous sibling
         # For the next sibling
-        total_time = 0
         for sibling_index in range(largest_num_siblings):
             h_parent, c_parent, h_prev_sibling, c_prev_sibling, is_parent, has_sibling, current_nodes_indices, vocabs_mask = \
                                                                             self.get_hidden_values(iteration, adj_list, edge_order, h_p, c_p, h_s, c_s,
@@ -150,8 +148,8 @@ class TreeLstmDecoderComplete(nn.Module):
             h_pred = torch.tanh(self.U_parent(h_parent) + self.U_sibling(h_prev_sibling))
 
             # Calculate parent and sibling loss
-            parent_loss = self.bce_loss(self.depth_pred(h_pred), is_parent)
-            sibling_loss = self.bce_loss(self.width_pred(h_pred), has_sibling)
+            parent_loss = self.bce_loss(self.depth_pred(h_pred), is_parent) / total_nodes
+            sibling_loss = self.bce_loss(self.width_pred(h_pred), has_sibling) / total_nodes
 
             loss += parent_loss + sibling_loss
             individual_losses['PARENT'] += parent_loss.item()
@@ -174,13 +172,14 @@ class TreeLstmDecoderComplete(nn.Module):
                     # Calculate cross entropy loss of label prediction
                     label_loss = self.cross_ent_losses[k]((label_pred 
                         + self.offset_parent(is_parent[vocabs_mask == k]) 
-                        + self.offset_sibling(has_sibling[vocabs_mask == k])), label[vocabs_mask == k].view(-1))  
+                        + self.offset_sibling(has_sibling[vocabs_mask == k])), label[vocabs_mask == k].view(-1))  / sum(target['vocabs'] == k)
 
                     loss += label_loss
                     individual_losses[k] += label_loss.item()
                     accuracies[k] += sum(torch.argmax(self.softmax(label_pred 
                         + self.offset_parent(is_parent[vocabs_mask == k]) 
                         + self.offset_sibling(has_sibling[vocabs_mask == k])), dim=-1) == label[vocabs_mask == k].view(-1))
+
 
                     # Calculate embedding of true label -> teacher forcing
                     if 'RES' in k or not self.params['INDIV_LAYERS_VOCABS']:
@@ -216,7 +215,7 @@ class TreeLstmDecoderComplete(nn.Module):
                         h_s[current_nodes_indices[vocabs_mask == k]] = h
                         c_s[current_nodes_indices[vocabs_mask == k]] = c
         
-        return loss, total_time
+        return loss
 
           
     def get_hidden_values(self, iteration, adj_list, edge_order, h_p, c_p, h_s, c_s, sibling_index,
@@ -286,10 +285,13 @@ class TreeLstmDecoderComplete(nn.Module):
         is_parent = torch.distributions.bernoulli.Bernoulli(p_parent).sample()
         has_sibling = torch.distributions.bernoulli.Bernoulli(p_sibling).sample()
 
+        # TODO Investigate why this is needed because it should not be needed
+        if parent_node is None:
+            is_parent = torch.tensor([1.], device=self.device)
+
         # Could also simply use > 0.5 instead OR TODO BEAM SEARCH
         # is_parent = torch.tensor(1) if p_parent > 0.5 else torch.tensor(0)
         # has_sibling = torch.tensor(1) if p_sibling > 0.5 else torch.tensor(0)
-
         if is_parent:
             node_type = 'RES'
         elif 'LITERAL' in idx_to_label[parent_node.token]:  
@@ -304,21 +306,24 @@ class TreeLstmDecoderComplete(nn.Module):
         # Node label prediction
         predicted_label = self.softmax(label_pred + self.offset_parent(is_parent) + self.offset_sibling(has_sibling))
         
+        # TODO sample the predicted label instead of argmax
+        # predicted_label = torch.distributions.categorical.Categorical(torch.exp(predicted_label)).sample()
+        predicted_label = torch.argmax(predicted_label, dim=-1)
+        
         # Build tree: Add node to tree
         if parent_node is None:
-            node = Node(torch.argmax(predicted_label, dim=-1).item(), is_reserved=True, parent=None)
+            node = Node(predicted_label.item(), is_reserved=True, parent=None)
         else:
-            node = Node(torch.argmax(predicted_label, dim=-1).item(), is_reserved=True if is_parent else False, parent=parent_node)
+            node = Node(predicted_label.item(), is_reserved=True if is_parent else False, parent=parent_node)
                     
-        if is_parent:
-            # Take argmax of predicted label
-            emb_label = self.embedding_layers['RES'](torch.argmax(predicted_label, dim=-1)).view(-1, self.params['EMBEDDING_DIM'])
+        if is_parent or not self.params['INDIV_LAYERS_VOCABS']:
+            emb_label = self.embedding_layers[node_type](predicted_label).view(-1, self.params['EMBEDDING_DIM'])
         else:
-            emb_label = self.embedding_layers[node_type](torch.argmax(predicted_label, dim=-1)).view(-1, self.params['LEAF_EMBEDDING_DIM'])
+            emb_label = self.embedding_layers[node_type](predicted_label).view(-1, self.params['LEAF_EMBEDDING_DIM'])
                     
         # If we predict a next sibling
         if has_sibling:  
-            if is_parent:
+            if is_parent or not self.params['INDIV_LAYERS_VOCABS']:
                 # Calculate next hidden sibling state
                 sibling_state = self.lstm_sibling(emb_label, sibling_state)
             else:

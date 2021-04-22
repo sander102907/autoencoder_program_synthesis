@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from tqdm import tqdm
+# from tqdm import tqdm_notebook as tqdm
 import torch
 from torch import optim
 import torch.nn as nn
@@ -78,6 +79,7 @@ class Vae():
         running_losses = {}
         loss_types = list(self.embedding_layers.keys()) + ['PARENT', 'SIBLING', 'KL']
         
+        # pbar = tqdm(unit='epoch')
         for epoch in range(epochs):
             pbar = tqdm(unit='batch')
             
@@ -87,6 +89,7 @@ class Vae():
             for batch_index, batch in enumerate(data_loader):
                 self.encoder_optimizer.zero_grad()
                 self.decoder_optimizer.zero_grad()
+
 
                 for key in batch.keys():
                     if key not in  ['tree_sizes', 'vocabs']:
@@ -108,8 +111,8 @@ class Vae():
                 
                 for loss_type in individual_losses.keys():
                     running_losses[loss_type] += individual_losses[loss_type]
-
-                running_losses['KL'] += kl_loss
+        
+                running_losses['KL'] += kl_loss.item()
                 
               
                 # Add losses every "save_loss_per_num_batches"
@@ -117,6 +120,7 @@ class Vae():
                 #     for loss_type in loss_types:
                 #         self.losses[loss_type][f'epoch{epoch + 1}-batch{batch_index + 1}'] = running_losses[loss_type] / save_loss_per_num_batches 
                 #         running_losses[loss_type] = 0
+                # break
             print(running_losses)
                     
 #                 break
