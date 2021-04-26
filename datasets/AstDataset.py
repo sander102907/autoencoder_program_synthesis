@@ -12,10 +12,11 @@ import math
 class AstDataset(IterableDataset):
     "AST trees dataset"
     
-    def __init__(self, data_path, label_to_idx, max_tree_size=-1, remove_non_res=False):
+    def __init__(self, data_path, label_to_idx, max_tree_size=-1, remove_non_res=False, get_statistics_only=False):
         self.max_tree_size = max_tree_size
         self.label_to_idx = label_to_idx
         self.remove_non_res = remove_non_res
+        self.get_statistics_only = get_statistics_only
         
         if os.path.isfile(data_path):
             self.file_paths = [data_path]
@@ -35,14 +36,18 @@ class AstDataset(IterableDataset):
         # Because 36 / 8 = 4,5, then the last 4 files need to be shared by 8 workers
         # So each worker will read half a file in this example
         num_shareable_files = len(self.file_paths) % num_workers
-        unshared_files = self.file_paths[:-num_shareable_files]
-        shared_files = self.file_paths[-num_shareable_files:]
-        workers_per_shared_file = num_workers / len(shared_files)   
+
+        if num_shareable_files == 0:
+            unshared_files = self.file_paths
+            shared_files = []
+        else:
+            unshared_files = self.file_paths[:-num_shareable_files]
+            shared_files = self.file_paths[-num_shareable_files:]
+            workers_per_shared_file = num_workers / len(shared_files) 
         
         # first iterate over files that can be read independently
         for file_index, file_path in enumerate(unshared_files):
             if file_index % num_workers == worker_id:
-                print(f'{worker_id}: {file_path}\n')
                 # Create CSV file iterator
                 if file_path.endswith('.bz2'):
                     file_iterator = Bz2CsvLineReader(file_path).read_csv()
@@ -53,9 +58,13 @@ class AstDataset(IterableDataset):
                 next(file_iterator)
                 
                 for ast in file_iterator:
-                    tree, nodes = self.preprocess(ast)
-                    if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
-                        yield tree 
+                    if self.get_statistics_only:
+                        nodes, depths = self.get_statistics(ast)
+                        yield nodes, depths
+                    else:
+                        tree, nodes = self.preprocess(ast)
+                        if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
+                            yield tree 
         
         # iterate over files that have to be shared between workers
         for file_index, file_path in enumerate(shared_files):
@@ -74,9 +83,13 @@ class AstDataset(IterableDataset):
                     # e.g. 4 workers -> worker 0 reads lines 0, 4, 8 and worker 1 reads lines 1, 5, 9 etc...
                     # This is not optimal but certainly a speed up compared to just using 1 worker for each file
                     if worker_id - (file_index * workers_per_shared_file) == i % workers_per_shared_file:
-                        tree, nodes = self.preprocess(ast)
-                        if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
-                            yield tree 
+                        if self.get_statistics_only:
+                            nodes, depths = self.get_statistics(ast)
+                            yield nodes, depths
+                        else:
+                            tree, nodes = self.preprocess(ast)
+                            if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
+                                yield tree 
                     
         
     def preprocess(self, ast):
@@ -92,6 +105,16 @@ class AstDataset(IterableDataset):
             tree = {}
             
         return tree, nodes
+
+    def get_statistics(self, ast):
+        # load the JSON of the tree
+        tree = json.loads(ast[1])
+
+        # Get the amount of nodes
+        nodes = self.get_amt_nodes(tree)
+        depths = self.get_max_depth(tree)
+
+        return nodes, depths        
         
     def get_amt_nodes(self, root, nodes=0):
         if 'children' in root:
@@ -108,8 +131,15 @@ class AstDataset(IterableDataset):
                 root['children'].remove(child)
 
         return nodes + 1
-    
-                    
+
+
+    def get_max_depth(self, root):
+        if 'children' in root:
+            return 1 + max(self.get_max_depth(child) for child in root['children'])
+        else:
+            return 1
+
+  
     def _label_node_index(self, node, n=0):
         node['index'] = n
         if 'children' in node:
@@ -119,7 +149,10 @@ class AstDataset(IterableDataset):
         return n
 
 
-    def _gather_node_attributes(self, node, key, parent=None):
+    def _gather_node_attributes(self, node, key, parent=None, nameid_to_placeholderid=None):
+        if nameid_to_placeholderid is None:
+            nameid_to_placeholderid = {}
+
         if self.label_to_idx is not None:
             if node['res']:
                 feature = self.label_to_idx['RES'][node[key]]
@@ -132,8 +165,15 @@ class AstDataset(IterableDataset):
                     feature = self.label_to_idx['TYPE'][node[key]]
                     vocab = 'TYPE'
                 elif 'NAME' in self.label_to_idx.keys():
-                    feature = self.label_to_idx['NAME'][node[key]]
+                    # Map the name token to an ID -> if already mapped, get the ID, if not: add to mapping
+                    if self.label_to_idx['NAME'][node[key]] in nameid_to_placeholderid:
+                        feature = nameid_to_placeholderid[self.label_to_idx['NAME'][node[key]]]
+                    else:
+                        feature = len(nameid_to_placeholderid)
+                        nameid_to_placeholderid[self.label_to_idx['NAME'][node[key]]] = len(nameid_to_placeholderid)
+                        
                     vocab = 'NAME'
+                    
                 else:
                     feature = self.label_to_idx['NON_RES'][node[key]]
                     vocab = 'NON_RES'
@@ -145,13 +185,11 @@ class AstDataset(IterableDataset):
         vocabs = [vocab]
         if 'children' in node:
             for child in node['children']:
-                feature, vocab = self._gather_node_attributes(child, key, node) 
+                feature, vocab, nameid_to_placeholderid = self._gather_node_attributes(child, key, node, nameid_to_placeholderid) 
                 features.extend(feature)
                 vocabs += vocab
-                # vocabs.extend(vocab)
 
-        # print(vocabs)
-        return features, vocabs
+        return features, vocabs, nameid_to_placeholderid
 
 
     def _gather_adjacency_list(self, node):
@@ -168,7 +206,7 @@ class AstDataset(IterableDataset):
         # This modifies the original tree as a side effect
         self._label_node_index(tree)
 
-        features, vocabs = self._gather_node_attributes(tree, 'token')
+        features, vocabs, nameid_to_placeholderid = self._gather_node_attributes(tree, 'token')
         adjacency_list = self._gather_adjacency_list(tree)
 
         
@@ -182,7 +220,8 @@ class AstDataset(IterableDataset):
             'adjacency_list': torch.tensor(adjacency_list, dtype=torch.int64),
             'edge_order_bottomup': torch.tensor(edge_order_bottomup, dtype=torch.int32),
             'edge_order_topdown': torch.tensor(edge_order_topdown, dtype=torch.int32),
-            'vocabs': vocabs
+            'vocabs': vocabs,
+            'nameid_to_placeholderid': nameid_to_placeholderid
         }
     
     

@@ -63,36 +63,37 @@ class Vae():
         
         self.device = device
         
-    def train(self, data_loader, epochs, save_dir=None):
+    def train(self, epochs, train_loader, val_loader=None, save_dir=None):
         """
         Trains the VAE model for the chosen encoder, decoder and its optimizers with the given loss function.
-        @param data_loader: Torch Dataset that generates batches to train on
         @param epochs: The number of epochs to train for
+        @param train_loader: Torch Dataset that generates batches to train on
+        @param val_loader: Torch Dataset that generates batches to validate on
         @param save_dir: The directory to save model checkpoints to, will save every epoch if save_path is given
         """
         
-        self.encoder.train()
-        self.decoder.train()
         
         save_loss_per_num_batches = 1
         
         running_losses = {}
         loss_types = list(self.embedding_layers.keys()) + ['PARENT', 'SIBLING', 'KL']
         
-        # pbar = tqdm(unit='epoch')
         for epoch in range(epochs):
             pbar = tqdm(unit='batch')
             
             for loss_type in loss_types:
                 running_losses[loss_type] = 0
-            
-            for batch_index, batch in enumerate(data_loader):
+
+            self.encoder.train()
+            self.decoder.train()  
+
+            for batch_index, batch in enumerate(train_loader):
                 self.encoder_optimizer.zero_grad()
                 self.decoder_optimizer.zero_grad()
 
 
                 for key in batch.keys():
-                    if key not in  ['tree_sizes', 'vocabs']:
+                    if key not in  ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
                         batch[key] = batch[key].to(self.device)
 
                 z, kl_loss = self.encoder(batch)
@@ -104,9 +105,6 @@ class Vae():
                 torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), self.clip)
                 self.encoder_optimizer.step()
                 self.decoder_optimizer.step()
-
-                pbar.set_postfix({'loss':loss.item(), 'kl_loss':kl_loss.item(), 'recon_loss':reconstruction_loss.item(), 'kl weight':(epoch/(epochs - 1)), 'acc_parent':accuracies['PARENT'], 'acc_sibling':accuracies['SIBLING'], 'acc_RES':accuracies['RES'], 'acc_NAME':accuracies['NAME'], 'acc_TYPE':accuracies['TYPE'], 'acc_LIT': accuracies['LITERAL']})
-                pbar.update()
                 
                 
                 for loss_type in individual_losses.keys():
@@ -120,14 +118,44 @@ class Vae():
                 #     for loss_type in loss_types:
                 #         self.losses[loss_type][f'epoch{epoch + 1}-batch{batch_index + 1}'] = running_losses[loss_type] / save_loss_per_num_batches 
                 #         running_losses[loss_type] = 0
-                # break
             print(running_losses)
                     
 #                 break
-                    
+            val_loss = None
+
+            if val_loader is not None:
+                self.encoder.eval()
+                self.decoder.eval()
+
+                for batch_index, batch in enumerate(val_loader):
+                    for key in batch.keys():
+                        if key not in  ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
+                            batch[key] = batch[key].to(self.device)
+
+                    z, kl_loss = self.encoder(batch)
+                    reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch)
+                    val_loss = (kl_loss * (epoch/(epochs - 1)) + reconstruction_loss).item()
+
+
+            pbar.set_postfix({
+             'train_loss':loss.item(),
+             'val_loss': val_loss,
+             'kl_loss':kl_loss.item(),
+             'recon_loss':reconstruction_loss.item(),
+             'kl weight':(epoch/(epochs - 1)),
+             'acc_parent':accuracies['PARENT'],
+             'acc_sibling':accuracies['SIBLING'],
+             'acc_RES':accuracies['RES'],
+             'acc_NAME':accuracies['NAME'],
+             'acc_TYPE':accuracies['TYPE'],
+             'acc_LIT': accuracies['LITERAL']})
+            pbar.update()
+          
                         
             if save_dir is not None:
                 self.save_model(os.path.join(save_dir, f'VAE_epoch{epoch}_{datetime.now().strftime("%d-%m-%Y_%H:%M")}.tar'))
+
+
                         
         return self.losses
         
