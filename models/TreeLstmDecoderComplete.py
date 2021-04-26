@@ -31,7 +31,11 @@ class TreeLstmDecoderComplete(nn.Module):
         for k, embedding_layer in embedding_layers.items():
             if not 'RES' in k and params['INDIV_LAYERS_VOCABS']:
                 self.leaf_lstms_sibling[k] = nn.LSTMCell(params['LEAF_EMBEDDING_DIM'], params['HIDDEN_SIZE'])
-            self.prediction_layers[k] = nn.Linear(params['LATENT_DIM'], params[f'{k}_VOCAB_SIZE'])
+            if k == 'NAME':
+                self.prediction_layers[k] = nn.Linear(params['LATENT_DIM'], params['NAME_ID_VOCAB_SIZE'])    
+            else:
+                self.prediction_layers[k] = nn.Linear(params['LATENT_DIM'], params[f'{k}_VOCAB_SIZE'])
+                
             self.cross_ent_losses[k] = nn.CrossEntropyLoss(weight=params[f'{k}_WEIGHTS'], reduction='sum')
 
         
