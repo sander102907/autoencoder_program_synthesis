@@ -9,7 +9,7 @@ from datasets.AstDataset import AstDataset
 from utils.TreeLstmUtils import batch_tree_input
 from models.Vae import Vae
 from loss_functions.TreeVaeLoss import TreeVaeLoss, TreeVaeLossComplete
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 csv.field_size_limit(sys.maxsize)
 
 # HYPERPARAMETERS

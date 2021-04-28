@@ -111,6 +111,22 @@ class Vae():
                     running_losses[loss_type] += individual_losses[loss_type]
         
                 running_losses['KL'] += kl_loss.item()
+
+                pbar.set_postfix({
+                'train_loss':loss.item(),
+                'kl_loss':kl_loss.item(),
+                'recon_loss':reconstruction_loss.item(),
+                'kl weight':(epoch/(epochs - 1)),
+                'acc_parent':accuracies['PARENT'],
+                'acc_sibling':accuracies['SIBLING'],
+                'acc_RES':accuracies['RES'],
+                'acc_NAME':accuracies['NAME'],
+                'acc_TYPE':accuracies['TYPE'],
+                'acc_LIT': accuracies['LITERAL']})
+                pbar.update()
+
+                if save_dir is not None and batch_index % 100 == 0:
+                    self.save_model(os.path.join(save_dir, f'VAE_epoch{epoch}_batch{batch_index}_{datetime.now().strftime("%d-%m-%Y_%H:%M")}.tar'))
                 
               
                 # Add losses every "save_loss_per_num_batches"
@@ -136,20 +152,6 @@ class Vae():
                     reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch)
                     val_loss = (kl_loss * (epoch/(epochs - 1)) + reconstruction_loss).item()
 
-
-            pbar.set_postfix({
-             'train_loss':loss.item(),
-             'val_loss': val_loss,
-             'kl_loss':kl_loss.item(),
-             'recon_loss':reconstruction_loss.item(),
-             'kl weight':(epoch/(epochs - 1)),
-             'acc_parent':accuracies['PARENT'],
-             'acc_sibling':accuracies['SIBLING'],
-             'acc_RES':accuracies['RES'],
-             'acc_NAME':accuracies['NAME'],
-             'acc_TYPE':accuracies['TYPE'],
-             'acc_LIT': accuracies['LITERAL']})
-            pbar.update()
           
                         
             if save_dir is not None:

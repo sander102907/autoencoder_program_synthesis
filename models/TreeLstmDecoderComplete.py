@@ -16,7 +16,7 @@ class TreeLstmDecoderComplete(nn.Module):
         self.embedding_layers = embedding_layers
         self.leaf_lstms_sibling = nn.ModuleDict({})
         self.prediction_layers = nn.ModuleDict({})
-        self.cross_ent_losses = nn.ModuleDict({}) 
+        self.label_losses = nn.ModuleDict({}) 
 
         
         self.lstm_parent = nn.LSTMCell(params['EMBEDDING_DIM'], params['LATENT_DIM'])
@@ -31,12 +31,20 @@ class TreeLstmDecoderComplete(nn.Module):
         for k, embedding_layer in embedding_layers.items():
             if not 'RES' in k and params['INDIV_LAYERS_VOCABS']:
                 self.leaf_lstms_sibling[k] = nn.LSTMCell(params['LEAF_EMBEDDING_DIM'], params['HIDDEN_SIZE'])
+
+
             if k == 'NAME':
                 self.prediction_layers[k] = nn.Linear(params['LATENT_DIM'], params['NAME_ID_VOCAB_SIZE'])    
+                self.label_losses[k] = nn.CrossEntropyLoss(weight=params[f'{k}_WEIGHTS'], reduction='sum')
+
+            elif k == 'LITERAL':
+                # Adaptive softmax loss does not need prediction layer, much faster approach for calculating softmax with highly imbalanced
+                # vocab. cutoffs: 10: 71.1%, 11-100: 18.8%, 101-1000: 7.8%, rest: 2.2%
+                self.label_losses[k] = nn.AdaptiveLogSoftmaxWithLoss(params['LATENT_DIM'], params[f'{k}_VOCAB_SIZE'], cutoffs=[10, 100, 1000])
+
             else:
                 self.prediction_layers[k] = nn.Linear(params['LATENT_DIM'], params[f'{k}_VOCAB_SIZE'])
-                
-            self.cross_ent_losses[k] = nn.CrossEntropyLoss(weight=params[f'{k}_WEIGHTS'], reduction='sum')
+                self.label_losses[k] = nn.CrossEntropyLoss(weight=params[f'{k}_WEIGHTS'], reduction='sum')
 
         
         self.sigmoid = nn.Sigmoid()
@@ -52,7 +60,7 @@ class TreeLstmDecoderComplete(nn.Module):
         """
         @param z: (batch_size, LATENT_DIM * 2) -> latent vector which is 2 * LATENT DIM as it contains latent vector for both hidden and cell state of LSTM
         @param target: dictionary containing tree information -> node_order_topdown, edge_order_topdown, features, adjacency_list and vocabs
-        @param idx_to_label: dictionary containing mapping from ids to labels
+        @param idx_to_label: dictionary containing mapping from ids to labels, needed for evaluation
         """
 
         # We are training and we can do teacher forcing and batch processing
@@ -77,7 +85,7 @@ class TreeLstmDecoderComplete(nn.Module):
             h_p = torch.zeros(total_nodes, self.latent_dim, device=self.device)
             c_p = torch.zeros(total_nodes, self.latent_dim, device=self.device)
             
-            #  h and c states for every node in the batch for sibling lstm
+            # h and c states for every node in the batch for sibling lstm
             h_s = torch.zeros(total_nodes, self.latent_dim, device=self.device)
             c_s = torch.zeros(total_nodes, self.latent_dim, device=self.device)
 
@@ -91,10 +99,6 @@ class TreeLstmDecoderComplete(nn.Module):
                     accuracies[loss_type] = (accuracies[loss_type]/ total_nodes).item()
                 else:
                     accuracies[loss_type] = (accuracies[loss_type]/ sum(target['vocabs'] == loss_type)).item()
-                #     individual_losses[loss_type] = individual_losses[loss_type] / total_nodes
-                # else:
-                #     individual_losses[loss_type] = individual_losses[loss_type] / sum(target['vocabs'] == loss_type)
-                # accuracies[loss_type] = (accuracies[loss_type]/ sum(target['vocabs'] == loss_type)).item()
             
             return total_loss, individual_losses, accuracies
         
@@ -164,19 +168,23 @@ class TreeLstmDecoderComplete(nn.Module):
             # Get true label values
             label = features[current_nodes_indices].long()
 
-            # print(sibling_index, h_parent.shape, h_pred.shape, label.shape, vocabs_mask.shape)
             # Iterate over possible node types and predict labels for each node type
             for k, prediction_layer in self.prediction_layers.items():
                 # Only do actual calculations when the amount of nodes for this node type > 0
                 if len(h_pred[vocabs_mask == k]) > 0:
                     # Get label predictions
-                    
-                    label_pred = prediction_layer(h_pred[vocabs_mask == k])
-                    
-                    # Calculate cross entropy loss of label prediction
-                    label_loss = self.cross_ent_losses[k]((label_pred 
-                        + self.offset_parent(is_parent[vocabs_mask == k]) 
-                        + self.offset_sibling(has_sibling[vocabs_mask == k])), label[vocabs_mask == k].view(-1))  / sum(target['vocabs'] == k)
+
+                    if k == 'LITERAL':
+                        # TODO look into how we can incorporate offset parent and offset sibling here (see below)
+                        # or if it even influences our loss since we work with the vocab types so maybe we can remove it altogether
+                        label_loss = self.label_losses[k](h_pred[vocabs_mask == k], label[vocabs_mask == k].view(-1))
+                    else:
+                        label_pred = prediction_layer(h_pred[vocabs_mask == k])
+                        
+                        # Calculate cross entropy loss of label prediction
+                        label_loss = self.label_losses[k]((label_pred 
+                            + self.offset_parent(is_parent[vocabs_mask == k]) 
+                            + self.offset_sibling(has_sibling[vocabs_mask == k])), label[vocabs_mask == k].view(-1))  / sum(target['vocabs'] == k)
 
                     loss += label_loss
                     individual_losses[k] += label_loss.item()
