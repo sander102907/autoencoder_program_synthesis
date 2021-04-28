@@ -185,11 +185,11 @@ class Vae():
         
         with torch.no_grad():
             for key in batch.keys():
-                if key not in  ['tree_sizes', 'vocabs']:
+                if key not in  ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
                     batch[key] = batch[key].to(self.device)
 
             z, _ = self.encoder(batch)
-            reconstructions += self.decoder(z, target=None, idx_to_label=idx_to_label)
+            reconstructions += self.decoder(z, target=None, idx_to_label=idx_to_label, nameid_to_placeholderid=batch['nameid_to_placeholderid'])
                 
         return reconstructions
             
