@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader, BufferedShuffleDataset
 import sys
 sys.path.append("utils/")
 from datasets.AstDataset import AstDataset
-from utils.TreeLstmUtils import batch_tree_input
+from TreeLstmUtils import batch_tree_input
 from models.Vae import Vae
 from loss_functions.TreeVaeLoss import TreeVaeLoss, TreeVaeLossComplete
 device = torch.device("cpu")

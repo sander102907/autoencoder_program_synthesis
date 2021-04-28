@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from utils.TreeNode import Node
+from models.TreeNode import Node
 from time import time
 
 class TreeLstmDecoderComplete(nn.Module):
@@ -152,6 +152,7 @@ class TreeLstmDecoderComplete(nn.Module):
             h_pred = torch.tanh(self.U_parent(h_parent) + self.U_sibling(h_prev_sibling))
 
             # Calculate parent and sibling loss
+            # TRY: Not dividing by total_nodes
             parent_loss = self.bce_loss(self.depth_pred(h_pred), is_parent) / total_nodes
             sibling_loss = self.bce_loss(self.width_pred(h_pred), has_sibling) / total_nodes
 
@@ -174,6 +175,7 @@ class TreeLstmDecoderComplete(nn.Module):
                     label_pred = prediction_layer(h_pred[vocabs_mask == k])
                     
                     # Calculate cross entropy loss of label prediction
+                    # TRY: Not dividing by sum()
                     label_loss = self.cross_ent_losses[k]((label_pred 
                         + self.offset_parent(is_parent[vocabs_mask == k]) 
                         + self.offset_sibling(has_sibling[vocabs_mask == k])), label[vocabs_mask == k].view(-1))  / sum(target['vocabs'] == k)

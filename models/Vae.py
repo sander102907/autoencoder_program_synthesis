@@ -5,8 +5,8 @@ from tqdm import tqdm
 import torch
 from torch import optim
 import torch.nn as nn
-from models.TreeLstmEncoder import TreeLstmEncoder
-from models.TreeLstmDecoder import TreeLstmDecoder
+#from models.TreeLstmEncoder import TreeLstmEncoder
+#from models.TreeLstmDecoder import TreeLstmDecoder
 from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
 from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
 from time import time
@@ -17,7 +17,7 @@ class Vae():
     Can also be used to easily save and load models
     """
     
-    def __init__(self, device, params):
+    def __init__(self, device, params, encoder, decoder):
         self.res_vocab_size = params['RES_VOCAB_SIZE']
         self.clip = params['CLIP']
         self.params = params
@@ -39,15 +39,18 @@ class Vae():
 
 
         # If we are using leaf tokens as well, se the complete encoder and decoder models
-        if len(self.embedding_layers) > 1:
-            self.encoder = TreeLstmEncoderComplete(device, params, self.embedding_layers).to(device)
-            self.decoder = TreeLstmDecoderComplete(device, params, self.embedding_layers).to(device)
-        else:
-            self.vocab_size = None
-            self.embedding = None
+        #if len(self.embedding_layers) > 1:
+            #self.encoder = TreeLstmEncoderComplete(device, params, self.embedding_layers).to(device)
+            #self.decoder = TreeLstmDecoderComplete(device, params, self.embedding_layers).to(device)
+        #else:
+            #self.vocab_size = None
+            #self.embedding = None
 
-            self.encoder = TreeLstmEncoder(device, params, self.res_embedding).to(device)
-            self.decoder = TreeLstmDecoder(device, params, self.res_embedding).to(device)
+            #self.encoder = TreeLstmEncoder(device, params, self.res_embedding).to(device)
+            #self.decoder = TreeLstmDecoder(device, params, self.res_embedding).to(device)
+        
+        self.encoder = encoder
+        self.decoder = decoder
 
         encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=params['LEARNING_RATE'])
         decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=params['LEARNING_RATE'])
@@ -92,9 +95,7 @@ class Vae():
                 self.decoder_optimizer.zero_grad()
 
 
-                for key in batch.keys():
-                    if key not in  ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
-                        batch[key] = batch[key].to(self.device)
+                batch = torch.Tensor(batch).to(self.device)
 
                 z, kl_loss = self.encoder(batch)
                 reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch)
@@ -142,13 +143,7 @@ class Vae():
              'val_loss': val_loss,
              'kl_loss':kl_loss.item(),
              'recon_loss':reconstruction_loss.item(),
-             'kl weight':(epoch/(epochs - 1)),
-             'acc_parent':accuracies['PARENT'],
-             'acc_sibling':accuracies['SIBLING'],
-             'acc_RES':accuracies['RES'],
-             'acc_NAME':accuracies['NAME'],
-             'acc_TYPE':accuracies['TYPE'],
-             'acc_LIT': accuracies['LITERAL']})
+             'kl weight':(epoch/(epochs - 1))})
             pbar.update()
           
                         
