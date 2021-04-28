@@ -22,7 +22,8 @@ params = {
     'EPOCHS': 30,
     'BATCH_SIZE': 1,
     'NUM_WORKERS': 8,
-    'CLIP': 5,
+    'CLIP_GRAD_NORM': 5,            # clip the gradient norm, setting to 0 ignores this
+    'CLIP_GRAD_VAL': 0,             # clip the gradient value, setting to 0 ignores this
     'KL_LOSS_WEIGHT': 0.001,
     'WEIGHTED_LOSS': False,         # Whether to weight the loss: with imbalanced vocabularies to how often the tokens occur
     'INDIV_LAYERS_VOCABS': False,   # Whether to use individual LSTM layers for each of the different vocabularies

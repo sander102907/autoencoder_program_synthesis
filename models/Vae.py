@@ -19,7 +19,8 @@ class Vae():
     
     def __init__(self, device, params):
         self.res_vocab_size = params['RES_VOCAB_SIZE']
-        self.clip = params['CLIP']
+        self.clip_grad_norm = params['CLIP_GRAD_NORM']  
+        self.clip_grad_val = params['CLIP_GRAD_VAL']
         self.params = params
 
         self.embedding_layers = nn.ModuleDict({})
@@ -98,11 +99,20 @@ class Vae():
 
                 z, kl_loss = self.encoder(batch)
                 reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch)
-                loss = kl_loss * (epoch/(epochs - 1)) + reconstruction_loss
+
+                # Calculate total loss and backprop
+                loss = kl_loss * ((epoch/(epochs - 1)) + 1e-8) + reconstruction_loss
                 loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.clip)
-                torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), self.clip)
+                if self.clip_grad_norm != 0:
+                    torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.clip_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), self.clip_grad_norm)
+
+                if self.clip_grad_val != 0:
+                    torch.nn.utils.clip_grad_value_(self.encoder.parameters(), self.clip_grad_val)
+                    torch.nn.utils.clip_grad_value_(self.decoder.parameters(), self.clip_grad_val)
+
+                # Update the weights
                 self.encoder_optimizer.step()
                 self.decoder_optimizer.step()
                 
