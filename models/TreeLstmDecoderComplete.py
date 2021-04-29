@@ -115,16 +115,25 @@ class TreeLstmDecoderComplete(nn.Module):
         # We are evaluating and we cannot use training forcing and we generate tree by tree
         elif idx_to_label is not None:
             trees = []
+            pred_features = []
 
             for index in range(z.shape[0]):
                 placeholderid_to_nameid = {
-                    v: k for k, v in nameid_to_placeholderid[index].items()}
+                    v: k for k, v in nameid_to_placeholderid[index].items()
+                }
+
                 h_parent, c_parent = torch.split(
-                    z[index], int(len(z[index])/2))
-                trees.append(self.decode_eval((h_parent.unsqueeze(0), c_parent.unsqueeze(
+                    z[index], int(len(z[index])/2)
+                )
+
+                tree, pred_features_tree = (self.decode_eval((h_parent.unsqueeze(0), c_parent.unsqueeze(
                     0)), None, idx_to_label, placeholderid_to_nameid))
 
-            return trees
+                trees.append(tree)
+                pred_features.append(pred_features_tree)
+
+
+            return trees, pred_features
 
     def decode_train(self, iteration, z, h_p, c_p, h_s, c_s, target, individual_losses, accuracies):
         batch_size = z.shape[0]
@@ -307,7 +316,7 @@ class TreeLstmDecoderComplete(nn.Module):
 
         return h_parent, c_parent, h_prev_sibling, c_prev_sibling, is_parent, has_sibling, current_nodes_indices, vocabs_mask
 
-    def decode_eval(self, parent_state, sibling_state, idx_to_label, placeholderid_to_nameid, parent_node=None, iteration=0):
+    def decode_eval(self, parent_state, sibling_state, idx_to_label, placeholderid_to_nameid, features=None, parent_node=None, iteration=0):
         h_parent, c_parent = parent_state
 
         if sibling_state is not None:
@@ -355,20 +364,30 @@ class TreeLstmDecoderComplete(nn.Module):
                 label_pred + self.offset_parent(is_parent) + self.offset_sibling(has_sibling))
 
         # TODO sample the predicted label instead of argmax
-        # predicted_label = torch.distributions.categorical.Categorical(torch.exp(predicted_label)).sample()
-        topk_log_prob, topk_indexes = predicted_label.topk(3, sorted=True)
+        predicted_label = torch.distributions.categorical.Categorical(torch.exp(predicted_label)).sample()
+        # topk_log_prob, topk_indexes = predicted_label.topk(3, sorted=True)
 
-        predicted_label = torch.argmax(predicted_label, dim=-1)
+        # predicted_label = torch.argmax(predicted_label, dim=-1)
 
         # Build tree: Add node to tree
         if parent_node is None:
             node = Node(predicted_label.item(), is_reserved=True, parent=None)
         elif node_type == 'NAME':
-            node = Node(placeholderid_to_nameid[predicted_label.item(
-            )], is_reserved=False, parent=parent_node)
+            if predicted_label in placeholderid_to_nameid:
+                node = Node(placeholderid_to_nameid[predicted_label.item(
+                )], is_reserved=False, parent=parent_node)
+            else:
+                # TODO Fix this as this is not correct!
+                node = Node(predicted_label.item(
+                ), is_reserved=False, parent=parent_node)
         else:
             node = Node(predicted_label.item(
             ), is_reserved=True if is_parent else False, parent=parent_node)
+
+        if features is None:
+            features = [predicted_label.item()]
+        else:
+            features.append(predicted_label.item())
 
         if is_parent or not self.params['INDIV_LAYERS_VOCABS']:
             emb_label = self.embedding_layers[node_type](
@@ -390,7 +409,7 @@ class TreeLstmDecoderComplete(nn.Module):
             # print(parent_state[0][0][0].item(), sibling_state[0][0][0].item(), torch.argmax(predicted_label, dim=-1).item(), node_type)
             # Pass the same parent state, but updated sibling state
             self.decode_eval(parent_state, sibling_state, idx_to_label,
-                             placeholderid_to_nameid, parent_node, iteration + 1)
+                             placeholderid_to_nameid, features, parent_node, iteration + 1)
 
         # We set the created node as the parent node
         parent_node = node
@@ -402,10 +421,11 @@ class TreeLstmDecoderComplete(nn.Module):
 
             # Pass new parent state and no sibling state as we start with the first sibling
             self.decode_eval(parent_state, None, idx_to_label,
-                             placeholderid_to_nameid, parent_node, iteration + 1)
+                             placeholderid_to_nameid, features, parent_node, iteration + 1)
 
         # If we are done, return the root node (which contains the entire tree)
-        return parent_node
+        return parent_node, features
+
 
 
 class BeamSearch():

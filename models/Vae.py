@@ -10,6 +10,8 @@ from models.TreeLstmDecoder import TreeLstmDecoder
 from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
 from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
 from time import time
+from nltk.translate.bleu_score import corpus_bleu
+
 
 
 class Vae():
@@ -220,6 +222,22 @@ class Vae():
             output = self.decoder(z, target=None, idx_to_label=idx_to_label)
 
         return output
+
+
+    def calculate_eval_scores(self, pred_features, data):
+        scores = {}
+
+        # Get correct formats
+        true_features = [f.view(-1).tolist() for f in torch.split(data['features'], data['tree_sizes'])]
+        pred_features = [[f] for f in pred_features]
+
+        # Compute blue scores
+        scores['bleu_4'] = corpus_bleu(pred_features, true_features)
+        scores['bleu_3'] = corpus_bleu(pred_features, true_features, weights=(1/3, 1/3, 1/3, 0))
+        scores['bleu_2'] = corpus_bleu(pred_features, true_features, weights=(1/2, 1/2, 0, 0))
+        scores['bleu_1'] = corpus_bleu(pred_features, true_features, weights=(1, 0, 0, 0))
+
+        return scores
 
     def save_model(self, path):
         """
