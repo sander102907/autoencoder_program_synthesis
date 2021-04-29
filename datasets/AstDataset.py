@@ -3,34 +3,36 @@ import csv
 import torch
 import json
 from treelstm import calculate_evaluation_orders
-from TreeLstmUtils import calculate_evaluation_orders_topdown
+from utils.TreeLstmUtils import calculate_evaluation_orders_topdown
 import os
 import bz2
 from functools import partial
 import math
 
+
 class AstDataset(IterableDataset):
     "AST trees dataset"
-    
+
     def __init__(self, data_path, label_to_idx, max_tree_size=-1, remove_non_res=False, get_statistics_only=False):
         self.max_tree_size = max_tree_size
         self.label_to_idx = label_to_idx
         self.remove_non_res = remove_non_res
         self.get_statistics_only = get_statistics_only
-        
+
         if os.path.isfile(data_path):
             self.file_paths = [data_path]
         else:
             self.file_paths = []
             for dirpath, _, files in os.walk(data_path):
-                self.file_paths += [os.path.join(dirpath, file) for file in files]
-            
-    def __iter__(self):        
+                self.file_paths += [os.path.join(dirpath, file)
+                                    for file in files]
+
+    def __iter__(self):
         # Get worker info, id and number of workers
         worker = torch.utils.data.get_worker_info()
         worker_id = worker.id if worker is not None else 0
         num_workers = worker.num_workers if worker is not None else 1
-        
+
         # Calculate files which can be read by the workers independently
         # So each 36 files with 8 workers, each worker can read at most 4 files independently
         # Because 36 / 8 = 4,5, then the last 4 files need to be shared by 8 workers
@@ -43,8 +45,8 @@ class AstDataset(IterableDataset):
         else:
             unshared_files = self.file_paths[:-num_shareable_files]
             shared_files = self.file_paths[-num_shareable_files:]
-            workers_per_shared_file = num_workers / len(shared_files) 
-        
+            workers_per_shared_file = num_workers / len(shared_files)
+
         # first iterate over files that can be read independently
         for file_index, file_path in enumerate(unshared_files):
             if file_index % num_workers == worker_id:
@@ -56,7 +58,7 @@ class AstDataset(IterableDataset):
 
                 # To skip the header, call next so the iterator starts from the first line
                 next(file_iterator)
-                
+
                 for ast in file_iterator:
                     if self.get_statistics_only:
                         nodes, depths = self.get_statistics(ast)
@@ -64,8 +66,8 @@ class AstDataset(IterableDataset):
                     else:
                         tree, nodes = self.preprocess(ast)
                         if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
-                            yield tree 
-        
+                            yield tree
+
         # iterate over files that have to be shared between workers
         for file_index, file_path in enumerate(shared_files):
             if math.floor(worker_id / workers_per_shared_file) == file_index:
@@ -76,7 +78,7 @@ class AstDataset(IterableDataset):
                     file_iterator = csv.reader(open(file_path))
                 # To skip the header, call next so the iterator starts from the first line
                 next(file_iterator)
-                
+
                 for i, ast in enumerate(file_iterator):
                     # Since multiple workers iterate over the same CSV file
                     # To avoid duplicate data, each worker reads unique lines from the dataset
@@ -89,21 +91,20 @@ class AstDataset(IterableDataset):
                         else:
                             tree, nodes = self.preprocess(ast)
                             if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
-                                yield tree 
-                    
-        
+                                yield tree
+
     def preprocess(self, ast):
         # load the JSON of the tree
         tree = json.loads(ast[1])
 
         # Get the amount of nodes
         nodes = self.get_amt_nodes(tree)
-        
+
         if nodes > 1:
             tree = self.convert_tree_to_tensors(tree)
         else:
             tree = {}
-            
+
         return tree, nodes
 
     def get_statistics(self, ast):
@@ -114,8 +115,8 @@ class AstDataset(IterableDataset):
         nodes = self.get_amt_nodes(tree)
         depths = self.get_max_depth(tree)
 
-        return nodes, depths        
-        
+        return nodes, depths
+
     def get_amt_nodes(self, root, nodes=0):
         if 'children' in root:
             to_remove = []
@@ -132,14 +133,12 @@ class AstDataset(IterableDataset):
 
         return nodes + 1
 
-
     def get_max_depth(self, root):
         if 'children' in root:
             return 1 + max(self.get_max_depth(child) for child in root['children'])
         else:
             return 1
 
-  
     def _label_node_index(self, node, n=0):
         node['index'] = n
         if 'children' in node:
@@ -147,7 +146,6 @@ class AstDataset(IterableDataset):
                 n += 1
                 n = self._label_node_index(child, n)
         return n
-
 
     def _gather_node_attributes(self, node, key, parent=None, nameid_to_placeholderid=None):
         if nameid_to_placeholderid is None:
@@ -170,27 +168,28 @@ class AstDataset(IterableDataset):
                         feature = nameid_to_placeholderid[self.label_to_idx['NAME'][node[key]]]
                     else:
                         feature = len(nameid_to_placeholderid)
-                        nameid_to_placeholderid[self.label_to_idx['NAME'][node[key]]] = len(nameid_to_placeholderid)
-                        
+                        nameid_to_placeholderid[self.label_to_idx['NAME'][node[key]]] = len(
+                            nameid_to_placeholderid)
+
                     vocab = 'NAME'
-                    
+
                 else:
                     feature = self.label_to_idx['NON_RES'][node[key]]
                     vocab = 'NON_RES'
         else:
-            feature = node[key]      
-            vocab = ''          
+            feature = node[key]
+            vocab = ''
 
         features = [[torch.tensor([feature])]]
         vocabs = [vocab]
         if 'children' in node:
             for child in node['children']:
-                feature, vocab, nameid_to_placeholderid = self._gather_node_attributes(child, key, node, nameid_to_placeholderid) 
+                feature, vocab, nameid_to_placeholderid = self._gather_node_attributes(
+                    child, key, node, nameid_to_placeholderid)
                 features.extend(feature)
                 vocabs += vocab
 
         return features, vocabs, nameid_to_placeholderid
-
 
     def _gather_adjacency_list(self, node):
         adjacency_list = []
@@ -206,12 +205,14 @@ class AstDataset(IterableDataset):
         # This modifies the original tree as a side effect
         self._label_node_index(tree)
 
-        features, vocabs, nameid_to_placeholderid = self._gather_node_attributes(tree, 'token')
+        features, vocabs, nameid_to_placeholderid = self._gather_node_attributes(
+            tree, 'token')
         adjacency_list = self._gather_adjacency_list(tree)
 
-        
-        node_order_bottomup, edge_order_bottomup = calculate_evaluation_orders(adjacency_list, len(features))
-        node_order_topdown, edge_order_topdown = calculate_evaluation_orders_topdown(adjacency_list, len(features))
+        node_order_bottomup, edge_order_bottomup = calculate_evaluation_orders(
+            adjacency_list, len(features))
+        node_order_topdown, edge_order_topdown = calculate_evaluation_orders_topdown(
+            adjacency_list, len(features))
 
         return {
             'features': torch.tensor(features, dtype=torch.int32),
@@ -223,19 +224,19 @@ class AstDataset(IterableDataset):
             'vocabs': vocabs,
             'nameid_to_placeholderid': nameid_to_placeholderid
         }
-    
-    
-    
+
+
 class Bz2CsvLineReader():
     """Line reader to read bz2 compressed CSV file line by line, helpful for the iterable dataset"""
+
     def __init__(self, filename):
         self.filename = filename
-        
+
     def _line_reader(self, file):
         for line in file:
             line = line.decode('utf-8')
             yield line
-        
+
     def read_csv(self):
         with bz2.BZ2File(self.filename, "r") as file:
             for i, row in enumerate(csv.reader(self._line_reader(file))):
@@ -260,4 +261,3 @@ class Bz2CsvLineReader():
 #                     buffer = '' if lines[-1].endswith('\n') else lines.pop()
 #                     for line in lines:
 #                         yield line
-    

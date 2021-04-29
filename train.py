@@ -1,16 +1,28 @@
+from loss_functions.TreeVaeLoss import TreeVaeLoss, TreeVaeLossComplete
+from models.Vae import Vae
+from utils.TreeLstmUtils import batch_tree_input
+from datasets.AstDataset import AstDataset
 import os
 import json
 import csv
 import torch
 from torch.utils.data import DataLoader, BufferedShuffleDataset
 import sys
-sys.path.append("utils/")
-from datasets.AstDataset import AstDataset
-from utils.TreeLstmUtils import batch_tree_input
-from models.Vae import Vae
-from loss_functions.TreeVaeLoss import TreeVaeLoss, TreeVaeLossComplete
+torch.multiprocessing.set_sharing_strategy('file_system')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-csv.field_size_limit(sys.maxsize)
+
+maxInt = sys.maxsize
+
+while True:
+    # decrease the maxInt value by factor 10
+    # as long as the OverflowError occurs.
+
+    try:
+        csv.field_size_limit(maxInt)
+        break
+    except OverflowError:
+        maxInt = int(maxInt/10)
+
 
 # HYPERPARAMETERS
 params = {
@@ -20,16 +32,21 @@ params = {
     'LATENT_DIM': 500,
     'LEARNING_RATE': 1e-3,
     'EPOCHS': 30,
-    'BATCH_SIZE': 1,
-    'NUM_WORKERS': 8,
+    'BATCH_SIZE': 32,
+    'NUM_WORKERS': 4,
     'CLIP_GRAD_NORM': 0,            # clip the gradient norm, setting to 0 ignores this
     'CLIP_GRAD_VAL': 0,             # clip the gradient value, setting to 0 ignores this
     'KL_LOSS_WEIGHT': 0.001,
-    'WEIGHTED_LOSS': False,         # Whether to weight the loss: with imbalanced vocabularies to how often the tokens occur
-    'INDIV_LAYERS_VOCABS': False,   # Whether to use individual LSTM layers for each of the different vocabularies
-    'TEACHER_FORCING_RATIO': 0.5,   # TODO: implement teacher forcing ratio -> does it make sense, e.g. predicted func decl but should be var decl then how does it work with children?
-    'NAME_ID_VOCAB_SIZE': 120,      # vocabulary size for name tokens which are mapped to non-unique IDs should be high enough to cover all programs
+    # Whether to weight the loss: with imbalanced vocabularies to how often the tokens occur
+    'WEIGHTED_LOSS': False,
+    # Whether to use individual LSTM layers for each of the different vocabularies
+    'INDIV_LAYERS_VOCABS': False,
+    # TODO: implement teacher forcing ratio -> does it make sense, e.g. predicted func decl but should be var decl then how does it work with children?
+    'TEACHER_FORCING_RATIO': 0.5,
+    # vocabulary size for name tokens which are mapped to non-unique IDs should be high enough to cover all programs
+    'NAME_ID_VOCAB_SIZE': 120,
 }
+
 
 def load_token_vocabulary(path):
     if os.path.isfile(path):
@@ -50,11 +67,11 @@ def load_token_vocabulary(path):
                         json_data = json_f.read()
 
                     # To JSON format (dictionary)
-                    for k,v in json.loads(json_data).items():
-                            if k in tokens:
-                                tokens[k] += v
-                            else:
-                                tokens[k] = v
+                    for k, v in json.loads(json_data).items():
+                        if k in tokens:
+                            tokens[k] += v
+                        else:
+                            tokens[k] = v
 
     return tokens
 
@@ -63,52 +80,59 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
     token_vocabs = {}
     label_to_idx = None
     idx_to_label = None
-    
+
     for k, path in tokens_paths.items():
         token_vocabs[k] = load_token_vocabulary(path)
         params[f'{k}_VOCAB_SIZE'] = len(token_vocabs[k])
-        
+
         if params['WEIGHTED_LOSS']:
             loss_weights = 1 / torch.tensor(list(token_vocabs[k].values()))
-            params[f'{k}_WEIGHTS'] = loss_weights / torch.sum(loss_weights) * len(token_vocabs[k]) * 1000
+            params[f'{k}_WEIGHTS'] = loss_weights / \
+                torch.sum(loss_weights) * len(token_vocabs[k]) * 1000
         else:
             if k == 'NAME':
-                params[f'{k}_WEIGHTS'] = torch.ones(params['NAME_ID_VOCAB_SIZE'])
-            else:  
+                params[f'{k}_WEIGHTS'] = torch.ones(
+                    params['NAME_ID_VOCAB_SIZE'])
+            else:
                 params[f'{k}_WEIGHTS'] = torch.ones(len(token_vocabs[k]))
-            
-    
+
     if not tokenized:
         label_to_idx = {}
         idx_to_label = {}
         for k, vocab in token_vocabs.items():
-            label_to_idx[k] = {k:i for i, k in enumerate(vocab.keys())}
-            idx_to_label[k] = {v:k for k, v in label_to_idx[k].items()}
-            
-    non_res_tokens = len(tokens_paths) > 1
-    
-    weights_res = 1 / torch.tensor(list(token_vocabs['RES'].values()))
-    params['WEIGHTS_RES'] = weights_res / torch.sum(weights_res) 
-    
-    train_dataset = AstDataset(dataset_path_train, label_to_idx, max_tree_size=750, remove_non_res=not non_res_tokens)
-    train_dataset = BufferedShuffleDataset(train_dataset, buffer_size = 8)
-    
-    val_dataset = AstDataset(dataset_path_val, label_to_idx, max_tree_size=750, remove_non_res=not non_res_tokens)
-    val_dataset = BufferedShuffleDataset(val_dataset, buffer_size = 8)
+            label_to_idx[k] = {k: i for i, k in enumerate(vocab.keys())}
+            idx_to_label[k] = {v: k for k, v in label_to_idx[k].items()}
 
-    train_loader = DataLoader(train_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
-    val_loader = DataLoader(val_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
-    
+    non_res_tokens = len(tokens_paths) > 1
+
+    weights_res = 1 / torch.tensor(list(token_vocabs['RES'].values()))
+    params['WEIGHTS_RES'] = weights_res / torch.sum(weights_res)
+
+    train_dataset = AstDataset(dataset_path_train, label_to_idx,
+                               max_tree_size=750, remove_non_res=not non_res_tokens)
+    train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=8)
+
+    val_dataset = AstDataset(dataset_path_val, label_to_idx,
+                             max_tree_size=750, remove_non_res=not non_res_tokens)
+    val_dataset = BufferedShuffleDataset(val_dataset, buffer_size=8)
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
+    val_loader = DataLoader(
+        val_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
+
     # set model
     vae = Vae(device, params)
 
-    save_dir = 'checkpoints/' + f'{params["LATENT_DIM"]}latent' + f'_{params["HIDDEN_SIZE"]}hidden' + f'{"_weightedloss" if params["WEIGHTED_LOSS"] else ""}' + f'{"_indivlayers" if params["INDIV_LAYERS_VOCABS"] else ""}' + '/'
+    save_dir = 'checkpoints/' + f'{params["LATENT_DIM"]}latent' + f'_{params["HIDDEN_SIZE"]}hidden' + \
+        f'{"_weightedloss" if params["WEIGHTED_LOSS"] else ""}' + \
+        f'{"_indivlayers" if params["INDIV_LAYERS_VOCABS"] else ""}' + '/'
 
     os.makedirs(save_dir, exist_ok=True)
-        
+
     # Train
     vae.train(params['EPOCHS'], train_loader, val_loader, save_dir)
-    
+
 
 if __name__ == "__main__":
     tokens_paths = {
