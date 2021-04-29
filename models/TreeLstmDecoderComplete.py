@@ -324,6 +324,8 @@ class TreeLstmDecoderComplete(nn.Module):
         
         # TODO sample the predicted label instead of argmax
         # predicted_label = torch.distributions.categorical.Categorical(torch.exp(predicted_label)).sample()
+        topk_log_prob, topk_indexes = predicted_label.topk(3, sorted=True)
+        
         predicted_label = torch.argmax(predicted_label, dim=-1)
         
         # Build tree: Add node to tree
@@ -366,5 +368,15 @@ class TreeLstmDecoderComplete(nn.Module):
 
         # If we are done, return the root node (which contains the entire tree)
         return parent_node
+
+
+class BeamSearch():
+    def __init__(self):
+        super().__init__()
+        candidates = []
+        
+
+
+    
         
         

@@ -35,7 +35,12 @@ class Vae():
                 else:
                     embbedding_size = params['LEAF_EMBEDDING_DIM']
 
-                self.embedding_layers[k.split('_')[0]] = nn.Embedding(params[k], embbedding_size)
+                if 'NAME' in k:
+                    vocab_size = params['NAME_ID_VOCAB_SIZE']
+                else:
+                    vocab_size = params[k]
+
+                self.embedding_layers[k.split('_')[0]] = nn.Embedding(vocab_size, embbedding_size)
 
 
 

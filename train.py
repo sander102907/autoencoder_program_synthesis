@@ -15,14 +15,14 @@ csv.field_size_limit(sys.maxsize)
 # HYPERPARAMETERS
 params = {
     'LEAF_EMBEDDING_DIM': 100,
-    'EMBEDDING_DIM': 200,
-    'HIDDEN_SIZE': 800,
-    'LATENT_DIM': 800,
-    'LEARNING_RATE': 1e-4,
+    'EMBEDDING_DIM': 30,
+    'HIDDEN_SIZE': 500,
+    'LATENT_DIM': 500,
+    'LEARNING_RATE': 1e-3,
     'EPOCHS': 30,
     'BATCH_SIZE': 1,
     'NUM_WORKERS': 8,
-    'CLIP_GRAD_NORM': 5,            # clip the gradient norm, setting to 0 ignores this
+    'CLIP_GRAD_NORM': 0,            # clip the gradient norm, setting to 0 ignores this
     'CLIP_GRAD_VAL': 0,             # clip the gradient value, setting to 0 ignores this
     'KL_LOSS_WEIGHT': 0.001,
     'WEIGHTED_LOSS': False,         # Whether to weight the loss: with imbalanced vocabularies to how often the tokens occur
