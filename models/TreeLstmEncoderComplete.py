@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-# from treelstm import TreeLSTM
 from models.tree_lstm import TreeLSTM
 
 class TreeLstmEncoderComplete(nn.Module):

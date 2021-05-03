@@ -86,21 +86,25 @@ class Vae():
         @param save_dir: The directory to save model checkpoints to, will save every epoch if save_path is given
         """
 
-        save_loss_per_num_batches = 1
-
         running_losses = {}
-        loss_types = list(self.embedding_layers.keys()) + \
+        loss_types_train = list(self.embedding_layers.keys()) + \
             ['PARENT', 'SIBLING', 'KL']
 
-        for epoch in range(epochs):
-            pbar = tqdm(unit='batch')
+        loss_types_val = [f'VAL_{ltype}' for ltype in loss_types_train]
 
-            for loss_type in loss_types:
+        for batch in train_loader:
+            break
+
+
+        for epoch in range(epochs):
+            for loss_type in loss_types_train + loss_types_val:
                 running_losses[loss_type] = 0
+                self.losses[loss_type] = {}
 
             self.encoder.train()
             self.decoder.train()
 
+            pbar = tqdm(unit='batch')
             for batch_index, batch in enumerate(train_loader):
                 self.encoder_optimizer.zero_grad()
                 self.decoder_optimizer.zero_grad()
@@ -115,7 +119,7 @@ class Vae():
 
                 # Calculate total loss and backprop
                 loss = kl_loss * ((epoch/(epochs - 1)) +
-                                  1e-8) + reconstruction_loss
+                                    1e-8) + reconstruction_loss
 
                 loss.backward()
 
@@ -153,34 +157,42 @@ class Vae():
                     'acc_LIT': accuracies['LITERAL']})
                 pbar.update()
 
-                if save_dir is not None and batch_index % 101 == 1:
-                    self.save_model(os.path.join(
-                        save_dir, f'VAE_epoch{epoch}_batch{batch_index}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
+                if batch_index % self.params['SAVE_PER_BATCHES'] == self.params['SAVE_PER_BATCHES'] - 1:
+                    for loss_type in loss_types_train:
+                        self.losses[loss_type][f'epoch{epoch}-batch{batch_index}'] = running_losses[loss_type] / self.params['SAVE_PER_BATCHES']
+                        running_losses[loss_type] = 0
 
-                # Add losses every "save_loss_per_num_batches"
-                # if batch_index % save_loss_per_num_batches == save_loss_per_num_batches - 1:
-                #     for loss_type in loss_types:
-                #         self.losses[loss_type][f'epoch{epoch + 1}-batch{batch_index + 1}'] = running_losses[loss_type] / save_loss_per_num_batches
-                #         running_losses[loss_type] = 0
-            print(running_losses)
+                    if save_dir is not None:
+                        self.save_model(os.path.join(
+                            save_dir, f'VAE_epoch{epoch}_batch{batch_index}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
 
-#                 break
-            # val_loss = None
+                break
 
-            # if val_loader is not None:
-            #     self.encoder.eval()
-            #     self.decoder.eval()
 
-            #     for batch_index, batch in enumerate(val_loader):
-            #         for key in batch.keys():
-            #             if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
-            #                 batch[key] = batch[key].to(self.device)
+            if val_loader is not None:
+                self.encoder.eval()
+                self.decoder.eval()
 
-            #         z, kl_loss = self.encoder(batch)
-            #         reconstruction_loss, individual_losses, accuracies = self.decoder(
-            #             z, batch)
-            #         val_loss = (kl_loss * (epoch/(epochs - 1)) +
-            #                     reconstruction_loss).item()
+                for batch_index, batch in tqdm(enumerate(val_loader), unit='batch'):
+                    with torch.no_grad():
+                        for key in batch.keys():
+                            if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
+                                batch[key] = batch[key].to(self.device)
+
+                        z, kl_loss = self.encoder(batch)
+                        reconstruction_loss, individual_losses, accuracies = self.decoder(
+                            z, batch)
+
+                        for loss_type in individual_losses.keys():
+                            running_losses[f'VAL_{loss_type}'] += individual_losses[loss_type]
+
+                        running_losses['VAL_KL'] += kl_loss.item()
+                        if batch_index > 1:
+                            break
+
+                for loss_type in loss_types_val:
+                    self.losses[loss_type][f'epoch{epoch}'] = running_losses[loss_type] / batch_index
+                    running_losses[loss_type] = 0
 
             if save_dir is not None:
                 self.save_model(os.path.join(
@@ -224,12 +236,20 @@ class Vae():
         return output
 
 
-    def calculate_eval_scores(self, pred_features, data):
+    def calculate_eval_scores(self, trees, data, idx_to_label):
+        """
+        Calculate evaluation scores for generated trees (e.g. BLEU scores)
+
+        @param trees: A batch of output of evaluation/generation function of the VAE
+        @param data: A batch of input for the VAE retrieved from the AstDataset
+        @param idx_to_label: Dictionary of ids to labels for the different node types
+        """
+
         scores = {}
 
         # Get correct formats
+        pred_features = [[self.retrieve_features_tree_dfs(tree, idx_to_label, data['nameid_to_placeholderid'][0])] for tree in trees]
         true_features = [f.view(-1).tolist() for f in torch.split(data['features'], data['tree_sizes'])]
-        pred_features = [[f] for f in pred_features]
 
         # Compute blue scores
         scores['bleu_4'] = corpus_bleu(pred_features, true_features)
@@ -239,14 +259,35 @@ class Vae():
 
         return scores
 
+
+    def retrieve_features_tree_dfs(self, node, idx_to_label, nameid_to_placeholderid):
+        """
+        Traverse Tree Depth first and put the features in a list. 
+        Here the name tokens are transformed to the placeholder IDs.
+        This way the features can be compared to the input data to calculate evaluation scores
+
+        @param node: Root Node of the tree
+        @param idx_to_label: Dictionary of ids to labels for the different node types
+        @param nameid_to_placeholderid: Dictionary of nameids to placeholder ids -> created by AstDataset
+        """
+
+        # If the node is a name node, get placeholder ID, otherwise simply append the token
+        if not node.res and 'LITERAL' not in idx_to_label['RES'][node.parent.token] and 'TYPE' != idx_to_label['RES'][node.parent.token]:
+            features = [nameid_to_placeholderid[node.token]]
+        else:
+            features = [node.token]
+            
+        for child in node.children:
+            features.extend(self.retrieve_features_tree_dfs(child, idx_to_label, nameid_to_placeholderid))
+                
+        return features
+
     def save_model(self, path):
         """
         Save the encoder, decoder and corresponding optimizer state dicts as well as losses to .tar
         Such that the model can be used to continue training or for inference
         @param path: Save the model to the given path
         """
-
-        print(path)
 
         os.makedirs('/'.join(path.split('/')[:-1]), exist_ok=True)
 
@@ -257,6 +298,7 @@ class Vae():
             'decoder_optimizer_state_dict': self.decoder_optimizer.state_dict(),
             'losses': self.losses
         }, path)
+
 
     def load_model(self, path):
         """

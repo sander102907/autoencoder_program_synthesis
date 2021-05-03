@@ -95,7 +95,9 @@ class AstDataset(IterableDataset):
 
     def preprocess(self, ast):
         # load the JSON of the tree
+        
         tree = json.loads(ast[1])
+        # print(ast[0], ast[1])
 
         # Get the amount of nodes
         nodes = self.get_amt_nodes(tree)

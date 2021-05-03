@@ -27,13 +27,13 @@ while True:
 # HYPERPARAMETERS
 params = {
     'LEAF_EMBEDDING_DIM': 100,
-    'EMBEDDING_DIM': 30,
-    'HIDDEN_SIZE': 500,
-    'LATENT_DIM': 500,
+    'EMBEDDING_DIM': 50,
+    'HIDDEN_SIZE': 48,
+    'LATENT_DIM': 48,
     'LEARNING_RATE': 1e-3,
     'EPOCHS': 30,
-    'BATCH_SIZE': 32,
-    'NUM_WORKERS': 4,
+    'BATCH_SIZE': 64,
+    'NUM_WORKERS': 8,
     'CLIP_GRAD_NORM': 0,            # clip the gradient norm, setting to 0 ignores this
     'CLIP_GRAD_VAL': 0,             # clip the gradient value, setting to 0 ignores this
     'KL_LOSS_WEIGHT': 0.001,
@@ -45,6 +45,7 @@ params = {
     'TEACHER_FORCING_RATIO': 0.5,
     # vocabulary size for name tokens which are mapped to non-unique IDs should be high enough to cover all programs
     'NAME_ID_VOCAB_SIZE': 120,
+    'SAVE_PER_BATCHES': 1000
 }
 
 
@@ -100,8 +101,15 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
         label_to_idx = {}
         idx_to_label = {}
         for k, vocab in token_vocabs.items():
+            vocab = dict(sorted(vocab.items(), key=lambda x:x[1], reverse=True))
             label_to_idx[k] = {k: i for i, k in enumerate(vocab.keys())}
             idx_to_label[k] = {v: k for k, v in label_to_idx[k].items()}
+
+            # Save to file to be used when transforming back to code
+            json_f = json.dumps(label_to_idx[k])
+            f = open(f'output/{k}_tokens.json', 'w')
+            f.write(json_f)
+            f.close()
 
     non_res_tokens = len(tokens_paths) > 1
 
