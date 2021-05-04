@@ -31,6 +31,7 @@ params = {
     'HIDDEN_SIZE': 48,
     'LATENT_DIM': 48,
     'LEARNING_RATE': 1e-3,
+    'NUM_LSTM_LAYERS': 2,
     'EPOCHS': 30,
     'BATCH_SIZE': 64,
     'NUM_WORKERS': 8,

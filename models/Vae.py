@@ -61,6 +61,8 @@ class Vae():
             self.decoder = TreeLstmDecoder(
                 device, params, self.res_embedding).to(device)
 
+        # encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=params['LEARNING_RATE'], momentum=0.9)
+        # decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=params['LEARNING_RATE'], momentum=0.9)
         encoder_optimizer = optim.Adam(
             self.encoder.parameters(), lr=params['LEARNING_RATE'])
         decoder_optimizer = optim.Adam(
@@ -92,10 +94,11 @@ class Vae():
 
         loss_types_val = [f'VAL_{ltype}' for ltype in loss_types_train]
 
-        for batch in train_loader:
-            break
+        # for batch in train_loader:
+        #     break
 
 
+        # pbar = tqdm(unit='batch')
         for epoch in range(epochs):
             for loss_type in loss_types_train + loss_types_val:
                 running_losses[loss_type] = 0
@@ -166,31 +169,33 @@ class Vae():
                         self.save_model(os.path.join(
                             save_dir, f'VAE_epoch{epoch}_batch{batch_index}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
 
+                # break
 
-            if val_loader is not None:
-                self.encoder.eval()
-                self.decoder.eval()
-                val_steps = 0
 
-                for batch_index, batch in tqdm(enumerate(val_loader), unit='batch'):
-                    with torch.no_grad():
-                        for key in batch.keys():
-                            if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
-                                batch[key] = batch[key].to(self.device)
+            # if val_loader is not None:
+            #     self.encoder.eval()
+            #     self.decoder.eval()
+            #     val_steps = 0
 
-                        z, kl_loss = self.encoder(batch)
-                        reconstruction_loss, individual_losses, accuracies = self.decoder(
-                            z, batch)
+            #     for batch_index, batch in tqdm(enumerate(val_loader), unit='batch'):
+            #         with torch.no_grad():
+            #             for key in batch.keys():
+            #                 if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
+            #                     batch[key] = batch[key].to(self.device)
 
-                        for loss_type in individual_losses.keys():
-                            running_losses[f'VAL_{loss_type}'] += individual_losses[loss_type]
+            #             z, kl_loss = self.encoder(batch)
+            #             reconstruction_loss, individual_losses, accuracies = self.decoder(
+            #                 z, batch)
 
-                        running_losses['VAL_KL'] += kl_loss.item()
-                        val_steps += 1
+            #             for loss_type in individual_losses.keys():
+            #                 running_losses[f'VAL_{loss_type}'] += individual_losses[loss_type]
 
-                for loss_type in loss_types_val:
-                    self.losses[loss_type][f'epoch{epoch}'] = running_losses[loss_type] / val_steps
-                    running_losses[loss_type] = 0
+            #             running_losses['VAL_KL'] += kl_loss.item()
+            #             val_steps += 1
+
+            #     for loss_type in loss_types_val:
+            #         self.losses[loss_type][f'epoch{epoch}'] = running_losses[loss_type] / val_steps
+            #         running_losses[loss_type] = 0
 
             if save_dir is not None:
                 self.save_model(os.path.join(
@@ -270,7 +275,7 @@ class Vae():
         """
 
         # If the node is a name node, get placeholder ID, otherwise simply append the token
-        if not node.res and 'LITERAL' not in idx_to_label['RES'][node.parent.token] and 'TYPE' != idx_to_label['RES'][node.parent.token]:
+        if not node.res and 'LITERAL' not in idx_to_label['RES'][node.parent.token] and 'TYPE' != idx_to_label['RES'][node.parent.token] and node.token in nameid_to_placeholderid:
             features = [nameid_to_placeholderid[node.token]]
         else:
             features = [node.token]

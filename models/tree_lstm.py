@@ -35,16 +35,6 @@ class TreeLSTM(torch.nn.Module):
         the tree processing should proceed in node_order and edge_order.
         '''
 
-        # Total number of nodes in every tree in the batch
-        batch_size = node_order.shape[0]
-
-        # Retrive device the model is currently loaded on to generate h, c, and h_sum result buffers
-        device = next(self.parameters()).device
-
-        # h and c states for every node in the batch
-        # h = torch.zeros(batch_size, self.out_features, device=device)
-        # c = torch.zeros(batch_size, self.out_features, device=device)
-
         # populate the h and c states respecting computation order
         for n in range(start_iteration, node_order.max() + 1):
             self._run_lstm(n, h, c, features, node_order, adjacency_list, edge_order)
