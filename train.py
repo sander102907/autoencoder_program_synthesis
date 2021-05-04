@@ -97,6 +97,8 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
             else:
                 params[f'{k}_WEIGHTS'] = torch.ones(len(token_vocabs[k]))
 
+    os.makedirs('output/', exist_ok=True)
+
     if not tokenized:
         label_to_idx = {}
         idx_to_label = {}

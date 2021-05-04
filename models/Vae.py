@@ -166,12 +166,11 @@ class Vae():
                         self.save_model(os.path.join(
                             save_dir, f'VAE_epoch{epoch}_batch{batch_index}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
 
-                break
-
 
             if val_loader is not None:
                 self.encoder.eval()
                 self.decoder.eval()
+                val_steps = 0
 
                 for batch_index, batch in tqdm(enumerate(val_loader), unit='batch'):
                     with torch.no_grad():
@@ -187,11 +186,10 @@ class Vae():
                             running_losses[f'VAL_{loss_type}'] += individual_losses[loss_type]
 
                         running_losses['VAL_KL'] += kl_loss.item()
-                        if batch_index > 1:
-                            break
+                        val_steps += 1
 
                 for loss_type in loss_types_val:
-                    self.losses[loss_type][f'epoch{epoch}'] = running_losses[loss_type] / batch_index
+                    self.losses[loss_type][f'epoch{epoch}'] = running_losses[loss_type] / val_steps
                     running_losses[loss_type] = 0
 
             if save_dir is not None:
