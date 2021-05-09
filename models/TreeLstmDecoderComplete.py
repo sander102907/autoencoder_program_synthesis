@@ -167,6 +167,7 @@ class TreeLstmDecoderComplete(nn.Module):
             for loss_type in loss_types:
                 if loss_type in ['PARENT', 'SIBLING']:
                     accuracies[loss_type] = accuracies[loss_type] / (total_nodes - z.shape[0])
+                    # print(loss_type, accuracies[loss_type])
                 else:
                     if loss_type == 'RES':
                         # Correct for root node -> is not predicted
@@ -193,9 +194,10 @@ class TreeLstmDecoderComplete(nn.Module):
                     z[index], int(len(z[index])/2)
                 )
 
-                trees.append(self.decode_eval((h_parent.unsqueeze(0), c_parent.unsqueeze(
-                    0)), None, idx_to_label, label_to_idx, placeholderid_to_nameid))
+                parent_state = [(h_parent.unsqueeze(0), c_parent.unsqueeze(0))] + [None for _ in range(self.params['NUM_LSTM_LAYERS'] - 1)]
+                sibling_state = [None for _ in range(self.params['NUM_LSTM_LAYERS'])]
 
+                trees.append(self.decode_eval(parent_state, sibling_state, idx_to_label, label_to_idx, placeholderid_to_nameid))
 
             return trees
 
@@ -213,6 +215,7 @@ class TreeLstmDecoderComplete(nn.Module):
         # At iteration 0, we are at the root
         if iteration == 0:
             h_parent, c_parent = torch.split(z, int(z.shape[-1]/2), dim=-1)
+            # print(z[:, :5])
             emb_label = self.embedding_layers['RES'](features[node_order == 0]).view(-1, self.params['EMBEDDING_DIM'])
 
             # Compute hidden and cell values of current nodes
@@ -223,8 +226,8 @@ class TreeLstmDecoderComplete(nn.Module):
                     h_parent_new, c_parent_new = self.lstms_parent[i](h_parent_new, None)
 
                 # Update the hidden and cell values matrices
-                h_p[i][node_order == 0] = h_parent_new
-                c_p[i][node_order == 0] = c_parent_new
+                h_p[i][node_order == 0] = h_parent
+                c_p[i][node_order == 0] = c_parent
 
         else:
             # Get adjacency list of prev iteration (so parents)
@@ -289,7 +292,7 @@ class TreeLstmDecoderComplete(nn.Module):
                 # Get true label values
                 label = features[current_nodes_indices].long()
 
-                # print(label[(self.sigmoid(self.depth_pred(h_pred)) >= 0.5) != (is_parent == 1)])
+                # print(label[label == 21], is_parent[torch.where(label == 21)], current_nodes_indices[torch.where(label == 21)[0]])
                 # Iterate over possible node types and predict labels for each node type
                 for k, prediction_layer in list(self.prediction_layers.items()) + [('LITERAL', _)]:
                     # Only do actual calculations when the amount of nodes for this node type > 0
@@ -322,7 +325,8 @@ class TreeLstmDecoderComplete(nn.Module):
                                                                         # + self.offset_sibling(has_sibling[vocabs_mask == k])
                                                                         ), dim=-1) == label[vocabs_mask == k].view(-1)).item()
 
-
+                            # pred_labels = torch.argmax(self.softmax(label_pred), dim=-1)
+                            # print(sibling_index, iteration, pred_labels[pred_labels != label[vocabs_mask == k].view(-1)].tolist(), pred_labels.tolist(), label[vocabs_mask == k].view(-1).tolist()) #, self.softmax(label_pred).topk(3, sorted=True)[1], self.softmax(label_pred).topk(3, sorted=True)[0], h_pred[:, :5],)
                         loss += label_loss
 
                         individual_losses[k] += label_loss.item()
@@ -455,7 +459,6 @@ class TreeLstmDecoderComplete(nn.Module):
         adj_list_curr = adj_list[edge_order == iteration, :]
         sib = list(first_sibling_indices) + [len(parent_indices)]
         vocabs_mask = np.atleast_1d(vocabs[current_nodes_indices.cpu()])
-
         is_parent = torch.tensor([[1.] if index in adj_list_curr[:, 0] else [
                                  0.] for index in current_nodes_indices], device=self.device)
         has_sibling = torch.tensor([[1.] if j-i - 1 > sibling_index else [0.]
@@ -465,8 +468,6 @@ class TreeLstmDecoderComplete(nn.Module):
         return h_parent, c_parent, h_prev_sibling, c_prev_sibling, is_parent, has_sibling, current_nodes_indices, vocabs_mask
 
     def decode_eval(self, parent_state, sibling_state, idx_to_label, label_to_idx, placeholderid_to_nameid, parent_node=None):
-        h_parent, c_parent = parent_state
-
         # If we are at the root
         if parent_node is None:
             # Get the root node ID
@@ -477,16 +478,24 @@ class TreeLstmDecoderComplete(nn.Module):
 
             # Update the parent state
             emb_label = self.embedding_layers['RES'](torch.tensor([root_id], device=self.device)).view(-1, self.params['EMBEDDING_DIM'])
-            parent_state = self.lstms_parent[0](emb_label, parent_state)
+
+            for i in range(self.params['NUM_LSTM_LAYERS']):
+                if i == 0:
+                    parent_state[i] = self.lstms_parent[i](emb_label, parent_state[i])
+                else:
+                    parent_state[i] = self.lstms_parent[i](parent_state[i-1][0], None)
 
             # Pass new parent state and no sibling state as we start with the first sibling
-            self.decode_eval(parent_state, None, idx_to_label, label_to_idx,
+            sibling_state = [None for _ in range(self.params['NUM_LSTM_LAYERS'])]
+
+            self.decode_eval(parent_state, sibling_state, idx_to_label, label_to_idx,
                              placeholderid_to_nameid, parent_node)
 
         else:
+            h_parent, c_parent = parent_state[-1]
 
-            if sibling_state is not None:
-                h_prev_sibling, c_prev_sibling = sibling_state
+            if not None in sibling_state:
+                h_prev_sibling, c_prev_sibling = sibling_state[-1]
             else:
                 # Initialize to hidden, cell of siblings to zero
                 h_prev_sibling = torch.zeros(
@@ -510,19 +519,23 @@ class TreeLstmDecoderComplete(nn.Module):
 
             parent_state_updated = torch.split(parent_state_updated, int(parent_state_updated.shape[-1]/2), dim=-1)
 
+
             # Probability of the node having children
             p_parent = self.sigmoid(self.depth_pred(h_pred))
             # Probability of the node having successor children
             p_sibling = self.sigmoid(self.width_pred(h_pred))
 
             # Sample is_parent and has_sibling from predicted probability of parent/sibling
+            # is_parent = True if p_parent >= 0.5 else False
+            # has_sibling = True if p_sibling >= 0.5 else False
             is_parent = torch.distributions.bernoulli.Bernoulli(p_parent).sample()
             has_sibling = torch.distributions.bernoulli.Bernoulli(
                 p_sibling).sample()
 
 
             # TODO Look into changing AST parser such that ACESS SPECIFIER child, such as public, is not a terminal anymore or not a reserved node
-            if is_parent or 'ACCESS_SPECIFIER' in idx_to_label[parent_node.token]:
+            # As well as ARGUMENTS that have NO children, and RETURN statement that has no children, these all do not get seen as reserved keywords here.
+            if is_parent or 'ACCESS_SPECIFIER' in idx_to_label[parent_node.token] or 'COMPOUND_STMT' in idx_to_label[parent_node.token] or 'CALL_EXPR' in idx_to_label[parent_node.token]:
                 node_type = 'RES'
             elif 'LITERAL' in idx_to_label[parent_node.token]:
                 node_type = 'LITERAL'
@@ -537,12 +550,15 @@ class TreeLstmDecoderComplete(nn.Module):
             else:
                 label_pred = self.prediction_layers[node_type](h_pred)
                 predicted_label = self.softmax(
-                    label_pred + self.offset_parent(is_parent) + self.offset_sibling(has_sibling))
+                    label_pred 
+                    # + self.offset_parent(is_parent) + self.offset_sibling(has_sibling)
+                    )
 
             # TODO beam search
             predicted_label = torch.distributions.categorical.Categorical(torch.exp(predicted_label)).sample()
-            # predicted_label = torch.argmax(predicted_label, dim=-1)
             # topk_log_prob, topk_indexes = predicted_label.topk(3, sorted=True)
+            # predicted_label = torch.argmax(predicted_label, dim=-1)
+            # print(parent_node.token, topk_indexes, topk_log_prob, p_parent)
 
 
             # Build tree: Add node to tree
@@ -557,7 +573,7 @@ class TreeLstmDecoderComplete(nn.Module):
                 ), is_reserved=True if node_type == 'RES' else False, parent=parent_node)
 
 
-            if is_parent or not self.params['INDIV_LAYERS_VOCABS']:
+            if node_type == 'RES' or not self.params['INDIV_LAYERS_VOCABS']:
                 emb_label = self.embedding_layers[node_type](
                     predicted_label).view(-1, self.params['EMBEDDING_DIM'])
             else:
@@ -568,7 +584,11 @@ class TreeLstmDecoderComplete(nn.Module):
             if has_sibling:
                 if is_parent or not self.params['INDIV_LAYERS_VOCABS']:
                     # Calculate next hidden sibling state
-                    sibling_state = self.lstms_sibling[0](emb_label, sibling_state)
+                    for i in range(self.params['NUM_LSTM_LAYERS']):
+                        if i == 0:
+                            sibling_state[i] = self.lstms_sibling[i](emb_label, sibling_state[i])
+                        else:
+                            sibling_state[i] = self.lstms_sibling[i](sibling_state[i-1][0], sibling_state[i])
                 else:
                     # Calculate next hidden sibling state
                     sibling_state = self.leaf_lstms_sibling[node_type](
@@ -583,11 +603,17 @@ class TreeLstmDecoderComplete(nn.Module):
 
             # If we predict we are a parent, continue with children
             if is_parent:
+                parent_state[-1] = parent_state_updated
                 # update parent state and parent_node of tree
-                parent_state = self.lstms_parent[0](emb_label, parent_state_updated)
+                for i in range(self.params['NUM_LSTM_LAYERS']):
+                        if i == 0:
+                            parent_state[i] = self.lstms_parent[i](emb_label, parent_state[i])
+                        else:
+                            parent_state[i] = self.lstms_parent[i](parent_state[i-1][0], parent_state[i])
 
                 # Pass new parent state and no sibling state as we start with the first sibling
-                self.decode_eval(parent_state, None, idx_to_label, label_to_idx,
+                sibling_state = [None for _ in range(self.params['NUM_LSTM_LAYERS'])]
+                self.decode_eval(parent_state, sibling_state, idx_to_label, label_to_idx,
                                 placeholderid_to_nameid, parent_node)
 
         # If we are done, return the root node (which contains the entire tree)

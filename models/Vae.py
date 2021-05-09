@@ -9,8 +9,10 @@ from models.TreeLstmEncoder import TreeLstmEncoder
 from models.TreeLstmDecoder import TreeLstmDecoder
 from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
 from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
+from models.TreeSeqRnnEncoder import TreeSeqRnnEncoder
 from time import time
 from nltk.translate.bleu_score import corpus_bleu
+import utils.KLScheduling as KLScheduling
 
 
 
@@ -25,7 +27,6 @@ class Vae():
         self.clip_grad_norm = params['CLIP_GRAD_NORM']
         self.clip_grad_val = params['CLIP_GRAD_VAL']
         self.params = params
-
         self.embedding_layers = nn.ModuleDict({})
 
         # Create shared embedding layers based on vocab sizes we give
@@ -44,12 +45,14 @@ class Vae():
                     vocab_size = params[k]
 
                 self.embedding_layers[k.split('_')[0]] = nn.Embedding(
-                    vocab_size, embbedding_size)
+                    vocab_size + 1, embbedding_size)
 
         # If we are using leaf tokens as well, se the complete encoder and decoder models
         if len(self.embedding_layers) > 1:
             self.encoder = TreeLstmEncoderComplete(
                 device, params, self.embedding_layers).to(device)
+
+            # self.encoder = TreeSeqRnnEncoder(device, params, self.embedding_layers).to(device)
             self.decoder = TreeLstmDecoderComplete(
                 device, params, self.embedding_layers).to(device)
         else:
@@ -61,8 +64,7 @@ class Vae():
             self.decoder = TreeLstmDecoder(
                 device, params, self.res_embedding).to(device)
 
-        # encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=params['LEARNING_RATE'], momentum=0.9)
-        # decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=params['LEARNING_RATE'], momentum=0.9)
+
         encoder_optimizer = optim.Adam(
             self.encoder.parameters(), lr=params['LEARNING_RATE'])
         decoder_optimizer = optim.Adam(
@@ -71,8 +73,6 @@ class Vae():
         self.encoder_optimizer = encoder_optimizer
         self.decoder_optimizer = decoder_optimizer
 
-        # loss function
-        # self.loss_function = loss_function
 
         # Store losses -> so we can easily save them
         self.losses = {}
@@ -88,6 +88,9 @@ class Vae():
         @param save_dir: The directory to save model checkpoints to, will save every epoch if save_path is given
         """
 
+        kl_scheduler = KLScheduling.CyclicalAnnealing(epochs)
+
+
         running_losses = {}
         loss_types_train = list(self.embedding_layers.keys()) + \
             ['PARENT', 'SIBLING', 'KL']
@@ -98,7 +101,8 @@ class Vae():
         #     break
 
 
-        # pbar = tqdm(unit='batch')
+
+        pbar = tqdm(unit='batch')
         for epoch in range(epochs):
             for loss_type in loss_types_train + loss_types_val:
                 running_losses[loss_type] = 0
@@ -107,7 +111,11 @@ class Vae():
             self.encoder.train()
             self.decoder.train()
 
-            pbar = tqdm(unit='batch')
+            # self.encoder.eval()
+            # self.decoder.eval()
+
+            # pbar = tqdm(unit='batch')
+            # with torch.no_grad():
             for batch_index, batch in enumerate(train_loader):
                 self.encoder_optimizer.zero_grad()
                 self.decoder_optimizer.zero_grad()
@@ -116,13 +124,19 @@ class Vae():
                     if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
                         batch[key] = batch[key].to(self.device)
 
+                # z = []
+                # for tree_size in batch['tree_sizes']:
+                #     z.append(self.zs[self.tree_sizes_to_id[tree_size]])
+
+                # z = torch.tensor(z, device=self.device).float()
+                # print(z[:, :5])
+
                 z, kl_loss = self.encoder(batch)
                 reconstruction_loss, individual_losses, accuracies = self.decoder(
                     z, batch)
 
                 # Calculate total loss and backprop
-                loss = kl_loss * ((epoch/(epochs - 1)) +
-                                    1e-8) + reconstruction_loss
+                loss = kl_loss * kl_scheduler.get_weight(epoch) + reconstruction_loss
 
                 loss.backward()
 
@@ -151,7 +165,7 @@ class Vae():
                     'train_loss': loss.item(),
                     'kl_loss': kl_loss.item(),
                     'recon_loss': reconstruction_loss.item(),
-                    'kl weight': (epoch/(epochs - 1)),
+                    'kl weight': kl_scheduler.get_weight(epoch),
                     'acc_parent': accuracies['PARENT'],
                     'acc_sibling': accuracies['SIBLING'],
                     'acc_RES': accuracies['RES'],
@@ -169,7 +183,8 @@ class Vae():
                         self.save_model(os.path.join(
                             save_dir, f'VAE_epoch{epoch}_batch{batch_index}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
 
-                # break
+                # if batch_index > 9:
+                break
 
 
             # if val_loader is not None:
@@ -219,6 +234,13 @@ class Vae():
                 if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
                     batch[key] = batch[key].to(self.device)
 
+            # z = []
+            # for tree_size in batch['tree_sizes']:
+            #     z.append(self.zs[self.tree_sizes_to_id[tree_size]])
+
+            # z = torch.tensor(z, device=self.device).float()
+            # print(z[:, :5])
+
             z, _ = self.encoder(batch)
             reconstructions += self.decoder(z, target=None, idx_to_label=idx_to_label,
                                             nameid_to_placeholderid=batch['nameid_to_placeholderid'])
@@ -251,7 +273,7 @@ class Vae():
         scores = {}
 
         # Get correct formats
-        pred_features = [[self.retrieve_features_tree_dfs(tree, idx_to_label, data['nameid_to_placeholderid'][0])] for tree in trees]
+        pred_features = [[self.retrieve_features_tree_dfs(tree, idx_to_label, data['nameid_to_placeholderid'][index])] for index, tree in enumerate(trees)]
         true_features = [f.view(-1).tolist() for f in torch.split(data['features'], data['tree_sizes'])]
 
         # Compute blue scores
