@@ -142,3 +142,4 @@ data/
 test.py
 checkpoints/
 Tree_LSTM_VAE.ipynb
+output/
