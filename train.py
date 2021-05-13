@@ -38,14 +38,16 @@ params = {
     'CLIP_GRAD_NORM': 0,            # clip the gradient norm, setting to 0 ignores this
     'CLIP_GRAD_VAL': 0,             # clip the gradient value, setting to 0 ignores this
     'KL_LOSS_WEIGHT': 0.001,
+    'VAE': False,
     # Whether to weight the loss: with imbalanced vocabularies to how often the tokens occur
     'WEIGHTED_LOSS': False,
     # Whether to use individual LSTM layers for each of the different vocabularies
     'INDIV_LAYERS_VOCABS': False,
     # TODO: implement teacher forcing ratio -> does it make sense, e.g. predicted func decl but should be var decl then how does it work with children?
     'TEACHER_FORCING_RATIO': 0.5,
+    'TOP_NAMES_TO_KEEP': 300,
     # vocabulary size for name tokens which are mapped to non-unique IDs should be high enough to cover all programs
-    'NAME_ID_VOCAB_SIZE': 120,
+    'NAME_ID_VOCAB_SIZE': 100,
     'SAVE_PER_BATCHES': 1000
 }
 
@@ -94,7 +96,7 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
         else:
             if k == 'NAME':
                 params[f'{k}_WEIGHTS'] = torch.ones(
-                    params['NAME_ID_VOCAB_SIZE'])
+                    params['TOP_NAMES_TO_KEEP'] + params['NAME_ID_VOCAB_SIZE'])
             else:
                 params[f'{k}_WEIGHTS'] = torch.ones(len(token_vocabs[k]))
 
@@ -116,16 +118,20 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
 
     non_res_tokens = len(tokens_paths) > 1
 
-    weights_res = 1 / torch.tensor(list(token_vocabs['RES'].values()))
-    params['WEIGHTS_RES'] = weights_res / torch.sum(weights_res)
+    # weights_res = 1 / torch.tensor(list(token_vocabs['RES'].values()))
+    # params['WEIGHTS_RES'] = weights_res / torch.sum(weights_res)
 
     train_dataset = AstDataset(dataset_path_train, label_to_idx,
-                               max_tree_size=750, remove_non_res=not non_res_tokens)
-    train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=8)
+                               max_tree_size=750, remove_non_res=not non_res_tokens,
+                               nr_of_names_to_keep=params['TOP_NAMES_TO_KEEP'])
+
+    train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=128)
 
     val_dataset = AstDataset(dataset_path_val, label_to_idx,
-                             max_tree_size=750, remove_non_res=not non_res_tokens)
-    val_dataset = BufferedShuffleDataset(val_dataset, buffer_size=8)
+                             max_tree_size=750, remove_non_res=not non_res_tokens,
+                             nr_of_names_to_keep=params['TOP_NAMES_TO_KEEP'])
+
+    val_dataset = BufferedShuffleDataset(val_dataset, buffer_size=128)
 
     train_loader = DataLoader(
         train_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])

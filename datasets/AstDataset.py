@@ -13,11 +13,12 @@ import math
 class AstDataset(IterableDataset):
     "AST trees dataset"
 
-    def __init__(self, data_path, label_to_idx, max_tree_size=-1, remove_non_res=False, get_statistics_only=False):
+    def __init__(self, data_path, label_to_idx, max_tree_size=-1, nr_of_names_to_keep=300, remove_non_res=False, get_statistics_only=False):
         self.max_tree_size = max_tree_size
         self.label_to_idx = label_to_idx
         self.remove_non_res = remove_non_res
         self.get_statistics_only = get_statistics_only
+        self.nr_of_names_to_keep = nr_of_names_to_keep
 
         if os.path.isfile(data_path):
             self.file_paths = [data_path]
@@ -62,7 +63,8 @@ class AstDataset(IterableDataset):
                 for ast in file_iterator:
                     if self.get_statistics_only:
                         nodes, depths = self.get_statistics(ast)
-                        yield nodes, depths
+                        if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
+                            yield nodes, depths, ast
                     else:
                         tree, nodes = self.preprocess(ast)
                         if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
@@ -87,7 +89,8 @@ class AstDataset(IterableDataset):
                     if worker_id - (file_index * workers_per_shared_file) == i % workers_per_shared_file:
                         if self.get_statistics_only:
                             nodes, depths = self.get_statistics(ast)
-                            yield nodes, depths
+                            if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
+                                yield nodes, depths, ast
                         else:
                             tree, nodes = self.preprocess(ast)
                             if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
@@ -165,13 +168,16 @@ class AstDataset(IterableDataset):
                     feature = self.label_to_idx['TYPE'][node[key]]
                     vocab = 'TYPE'
                 elif 'NAME' in self.label_to_idx.keys():
+                    name_id = self.label_to_idx['NAME'][node[key]]
+                    if name_id < self.nr_of_names_to_keep:
+                        feature = name_id
+
                     # Map the name token to an ID -> if already mapped, get the ID, if not: add to mapping
-                    if self.label_to_idx['NAME'][node[key]] in nameid_to_placeholderid:
-                        feature = nameid_to_placeholderid[self.label_to_idx['NAME'][node[key]]]
+                    elif name_id in nameid_to_placeholderid:
+                        feature = nameid_to_placeholderid[name_id]
                     else:
-                        feature = len(nameid_to_placeholderid)
-                        nameid_to_placeholderid[self.label_to_idx['NAME'][node[key]]] = len(
-                            nameid_to_placeholderid)
+                        feature = len(nameid_to_placeholderid) + self.nr_of_names_to_keep
+                        nameid_to_placeholderid[name_id] = feature
 
                     vocab = 'NAME'
 

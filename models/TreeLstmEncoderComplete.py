@@ -11,8 +11,8 @@ class TreeLstmEncoderComplete(nn.Module):
         self.hidden_size = params['HIDDEN_SIZE']
         self.embedding_layers = embedding_layers
         self.tree_lstms = nn.ModuleList([])
-        # self.tree_lstm = TreeLSTM(params['EMBEDDING_DIM'], params['HIDDEN_SIZE'])
         self.leaf_lstms = nn.ModuleDict({})
+        self.vae = self.params['VAE']
 
         for i in range(self.params['NUM_LSTM_LAYERS']):
             if i == 0:
@@ -36,8 +36,6 @@ class TreeLstmEncoderComplete(nn.Module):
         vocabs = inp['vocabs']
 
         features = torch.zeros(node_order.shape[0], self.params['EMBEDDING_DIM'], device=self.device)
-        # h = torch.zeros(node_order.shape[0], self.hidden_size, device=self.device)
-        # c = torch.zeros(node_order.shape[0], self.hidden_size, device=self.device)
         h = []
         c = []
 
@@ -79,8 +77,6 @@ class TreeLstmEncoderComplete(nn.Module):
         # hidden roots: (batch_size, hidden_size * 2)
         hidden_roots = torch.zeros(batch_size, self.hidden_size * 2, device=self.device)
         
-        # TODO GET hidden cell as well, and concat with hidden state such that we have 2 * LATENT DIM so decoder can be initialized with hidden cell as well
-
         # Offset to check in hidden state, start at zero, increase by tree size each time
         # Example: hidden  [1, 3, 5, 1, 5, 2] and tree_sizes = [4, 2] we want hidden[0] and hidden[4] -> 1, 5
         offset = 0
@@ -95,14 +91,17 @@ class TreeLstmEncoderComplete(nn.Module):
         # Parameterization trick
         z = self.reparameterize(z_mean, z_log_var)
 
-        kl_loss = 0.5 * torch.sum(z_log_var.exp() - z_log_var - 1 + z_mean.pow(2))
+        if self.vae:
+            kl_loss = 0.5 * torch.sum(z_log_var.exp() - z_log_var - 1 + z_mean.pow(2))
+        else:
+            kl_loss = torch.tensor([0], device=self.device)
         
         # Return latent vector, and mean and variance
         return z, kl_loss
         
         
     def reparameterize(self, mu, log_var):
-        if self.training:
+        if self.training and self.vae:
             std = torch.exp(0.5 * log_var)
             eps = std.data.new(std.size()).normal_()
             return eps.mul(std).add_(mu)

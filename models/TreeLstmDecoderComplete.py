@@ -91,7 +91,7 @@ class TreeLstmDecoderComplete(nn.Module):
             if k == 'NAME':
                 # For name tokens we predict reusable IDs of predefined size instead of actual tokens
                 self.prediction_layers[k] = nn.Linear(
-                    self.params['LATENT_DIM'] * 2, self.params['NAME_ID_VOCAB_SIZE'])
+                    self.params['LATENT_DIM'] * 2, self.params['TOP_NAMES_TO_KEEP'] + self.params['NAME_ID_VOCAB_SIZE'])
 
                 # Name token cross entropy loss
                 self.label_losses[k] = nn.CrossEntropyLoss(
@@ -177,7 +177,7 @@ class TreeLstmDecoderComplete(nn.Module):
 
             return total_loss, individual_losses, accuracies
 
-        # We are evaluating and we cannot use training forcing and we generate tree by tree
+         # We are evaluating and we cannot use training forcing and we generate tree by tree
         elif idx_to_label is not None:
             trees = []
             label_to_idx = {v:k for k,v in idx_to_label.items()}
@@ -467,7 +467,8 @@ class TreeLstmDecoderComplete(nn.Module):
 
         return h_parent, c_parent, h_prev_sibling, c_prev_sibling, is_parent, has_sibling, current_nodes_indices, vocabs_mask
 
-    def decode_eval(self, parent_state, sibling_state, idx_to_label, label_to_idx, placeholderid_to_nameid, parent_node=None):
+
+     def decode_eval(self, parent_state, sibling_state, idx_to_label, label_to_idx, placeholderid_to_nameid, parent_node=None):
         # If we are at the root
         if parent_node is None:
             # Get the root node ID
@@ -618,10 +619,3 @@ class TreeLstmDecoderComplete(nn.Module):
 
         # If we are done, return the root node (which contains the entire tree)
         return parent_node
-
-
-
-class BeamSearch():
-    def __init__(self):
-        super().__init__()
-        candidates = []

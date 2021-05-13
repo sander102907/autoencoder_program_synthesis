@@ -40,7 +40,7 @@ class Vae():
                     embbedding_size = params['LEAF_EMBEDDING_DIM']
 
                 if 'NAME' in k:
-                    vocab_size = params['NAME_ID_VOCAB_SIZE']
+                    vocab_size = params['TOP_NAMES_TO_KEEP'] + params['NAME_ID_VOCAB_SIZE']
                 else:
                     vocab_size = params[k]
 
@@ -88,7 +88,7 @@ class Vae():
         @param save_dir: The directory to save model checkpoints to, will save every epoch if save_path is given
         """
 
-        kl_scheduler = KLScheduling.CyclicalAnnealing(epochs)
+        kl_scheduler = KLScheduling.CyclicalAnnealing(287*epochs)
 
 
         running_losses = {}
@@ -96,17 +96,17 @@ class Vae():
             ['PARENT', 'SIBLING', 'KL']
 
         loss_types_val = [f'VAL_{ltype}' for ltype in loss_types_train]
+        current_iteration = 0
 
-        # for batch in train_loader:
-        #     break
+        for loss_type in loss_types_train + loss_types_val:
+            self.losses[loss_type] = {}
 
 
 
-        pbar = tqdm(unit='batch')
+        # pbar = tqdm(unit='batch')
         for epoch in range(epochs):
             for loss_type in loss_types_train + loss_types_val:
                 running_losses[loss_type] = 0
-                self.losses[loss_type] = {}
 
             self.encoder.train()
             self.decoder.train()
@@ -114,7 +114,7 @@ class Vae():
             # self.encoder.eval()
             # self.decoder.eval()
 
-            # pbar = tqdm(unit='batch')
+            pbar = tqdm(unit='batch')
             # with torch.no_grad():
             for batch_index, batch in enumerate(train_loader):
                 self.encoder_optimizer.zero_grad()
@@ -136,7 +136,7 @@ class Vae():
                     z, batch)
 
                 # Calculate total loss and backprop
-                loss = kl_loss * kl_scheduler.get_weight(epoch) + reconstruction_loss
+                loss = kl_loss * kl_scheduler.get_weight(current_iteration) + reconstruction_loss
 
                 loss.backward()
 
@@ -165,7 +165,7 @@ class Vae():
                     'train_loss': loss.item(),
                     'kl_loss': kl_loss.item(),
                     'recon_loss': reconstruction_loss.item(),
-                    'kl weight': kl_scheduler.get_weight(epoch),
+                    'kl weight': kl_scheduler.get_weight(current_iteration),
                     'acc_parent': accuracies['PARENT'],
                     'acc_sibling': accuracies['SIBLING'],
                     'acc_RES': accuracies['RES'],
@@ -173,6 +173,7 @@ class Vae():
                     'acc_TYPE': accuracies['TYPE'],
                     'acc_LIT': accuracies['LITERAL']})
                 pbar.update()
+                current_iteration += 1
 
                 if batch_index % self.params['SAVE_PER_BATCHES'] == self.params['SAVE_PER_BATCHES'] - 1:
                     for loss_type in loss_types_train:
@@ -184,7 +185,8 @@ class Vae():
                             save_dir, f'VAE_epoch{epoch}_batch{batch_index}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
 
                 # if batch_index > 9:
-                break
+                # break
+
 
 
             # if val_loader is not None:
