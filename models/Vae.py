@@ -16,13 +16,15 @@ import utils.KLScheduling as KLScheduling
 
 
 
-class Vae():
+class Vae(nn.Module):
     """
     A Vae model: wrapper for encoder, decoder models with train, evaluate and generate functions
     Can also be used to easily save and load models
     """
 
     def __init__(self, device, params):
+        super().__init__()
+
         self.res_vocab_size = params['RES_VOCAB_SIZE']
         self.clip_grad_norm = params['CLIP_GRAD_NORM']
         self.clip_grad_val = params['CLIP_GRAD_VAL']
@@ -49,37 +51,33 @@ class Vae():
 
         # If we are using leaf tokens as well, se the complete encoder and decoder models
         if len(self.embedding_layers) > 1:
-            self.encoder = TreeLstmEncoderComplete(
-                device, params, self.embedding_layers).to(device)
-
+            self.encoder = TreeLstmEncoderComplete(device, params, self.embedding_layers)
+            self.decoder = TreeLstmDecoderComplete(device, params, self.embedding_layers)
             # self.encoder = TreeSeqRnnEncoder(device, params, self.embedding_layers).to(device)
-            self.decoder = TreeLstmDecoderComplete(
-                device, params, self.embedding_layers).to(device)
         else:
             self.vocab_size = None
             self.embedding = None
 
-            self.encoder = TreeLstmEncoder(
-                device, params, self.res_embedding).to(device)
-            self.decoder = TreeLstmDecoder(
-                device, params, self.res_embedding).to(device)
+            self.encoder = TreeLstmEncoder(device, params, self.res_embedding)
+            self.decoder = TreeLstmDecoder(device, params, self.res_embedding)
 
 
-        encoder_optimizer = optim.Adam(
-            self.encoder.parameters(), lr=params['LEARNING_RATE'])
-        decoder_optimizer = optim.Adam(
-            self.decoder.parameters(), lr=params['LEARNING_RATE'])
 
-        self.encoder_optimizer = encoder_optimizer
-        self.decoder_optimizer = decoder_optimizer
-
+        self.optimizer = optim.Adam(self.parameters(), lr=params['LEARNING_RATE'])
 
         # Store losses -> so we can easily save them
         self.losses = {}
 
         self.device = device
 
-    def train(self, epochs, train_loader, val_loader=None, save_dir=None):
+    def forward(self, batch):
+        z, kl_loss = self.encoder(batch)
+        reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch)
+
+        return kl_loss, reconstruction_loss, individual_losses, accuracies
+
+
+    def fit(self, epochs, train_loader, val_loader=None, save_dir=None):
         """
         Trains the VAE model for the chosen encoder, decoder and its optimizers with the given loss function.
         @param epochs: The number of epochs to train for
@@ -88,12 +86,13 @@ class Vae():
         @param save_dir: The directory to save model checkpoints to, will save every epoch if save_path is given
         """
 
-        kl_scheduler = KLScheduling.CyclicalAnnealing(287*epochs)
+        self.train()
 
+        kl_scheduler = KLScheduling.CyclicalAnnealing(287*epochs, 300)
 
         running_losses = {}
         loss_types_train = list(self.embedding_layers.keys()) + \
-            ['PARENT', 'SIBLING', 'KL']
+            ['PARENT', 'SIBLING', 'IS_RES', 'KL']
 
         loss_types_val = [f'VAL_{ltype}' for ltype in loss_types_train]
         current_iteration = 0
@@ -102,38 +101,22 @@ class Vae():
             self.losses[loss_type] = {}
 
 
-
         # pbar = tqdm(unit='batch')
         for epoch in range(epochs):
             for loss_type in loss_types_train + loss_types_val:
                 running_losses[loss_type] = 0
 
-            self.encoder.train()
-            self.decoder.train()
-
-            # self.encoder.eval()
-            # self.decoder.eval()
-
             pbar = tqdm(unit='batch')
             # with torch.no_grad():
             for batch_index, batch in enumerate(train_loader):
-                self.encoder_optimizer.zero_grad()
-                self.decoder_optimizer.zero_grad()
+                self.optimizer.zero_grad()
 
                 for key in batch.keys():
                     if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
                         batch[key] = batch[key].to(self.device)
 
-                # z = []
-                # for tree_size in batch['tree_sizes']:
-                #     z.append(self.zs[self.tree_sizes_to_id[tree_size]])
-
-                # z = torch.tensor(z, device=self.device).float()
-                # print(z[:, :5])
-
-                z, kl_loss = self.encoder(batch)
-                reconstruction_loss, individual_losses, accuracies = self.decoder(
-                    z, batch)
+                
+                kl_loss, reconstruction_loss, individual_losses, accuracies = self(batch)
 
                 # Calculate total loss and backprop
                 loss = kl_loss * kl_scheduler.get_weight(current_iteration) + reconstruction_loss
@@ -153,8 +136,7 @@ class Vae():
                         self.decoder.parameters(), self.clip_grad_val)
 
                 # Update the weights
-                self.encoder_optimizer.step()
-                self.decoder_optimizer.step()
+                self.optimizer.step()
 
                 for loss_type in individual_losses.keys():
                     running_losses[loss_type] += individual_losses[loss_type]
@@ -168,6 +150,7 @@ class Vae():
                     'kl weight': kl_scheduler.get_weight(current_iteration),
                     'acc_parent': accuracies['PARENT'],
                     'acc_sibling': accuracies['SIBLING'],
+                    'acc_IS_RES': accuracies['IS_RES'],
                     'acc_RES': accuracies['RES'],
                     'acc_NAME': accuracies['NAME'],
                     'acc_TYPE': accuracies['TYPE'],
@@ -220,14 +203,14 @@ class Vae():
 
         return self.losses
 
+
     def evaluate(self, batch, idx_to_label):
         """
         Evaluates the VAE model: given data, reconstruct the input and output this
         @param data_loader: Torch Dataset that generates batches to evaluate on
         """
 
-        self.encoder.eval()
-        self.decoder.eval()
+        self.eval()
 
         reconstructions = []
 
@@ -235,13 +218,6 @@ class Vae():
             for key in batch.keys():
                 if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
                     batch[key] = batch[key].to(self.device)
-
-            # z = []
-            # for tree_size in batch['tree_sizes']:
-            #     z.append(self.zs[self.tree_sizes_to_id[tree_size]])
-
-            # z = torch.tensor(z, device=self.device).float()
-            # print(z[:, :5])
 
             z, _ = self.encoder(batch)
             reconstructions += self.decoder(z, target=None, idx_to_label=idx_to_label,
@@ -255,7 +231,7 @@ class Vae():
         @param z: latent vector(s) -> (batch_size, latent_size)
         """
 
-        self.decoder.eval()
+        self.eval()
 
         with torch.no_grad():
             output = self.decoder(z, target=None, idx_to_label=idx_to_label)

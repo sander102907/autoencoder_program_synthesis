@@ -27,9 +27,10 @@ class MonotonicAnnealing:
             function: Function used to increase β by, e.g. linear or sinusoidal (default linear)
     """
 
-    def __init__(self, total_iter, ratio=0.2, function='linear'):
+    def __init__(self, total_iter, nr_warmup_iterations=0, ratio=0.2, function='linear'):
         self.total_iter = total_iter
         self.ratio = ratio
+        self.nr_warmup_iterations = nr_warmup_iterations
 
         if function == 'linear':
             self.function = lambda tau: tau / ratio
@@ -40,12 +41,15 @@ class MonotonicAnnealing:
 
 
     def get_weight(self, current_iteration):
-        tau = current_iteration / self.total_iter
+        if current_iteration > self.nr_warmup_iterations:
+            tau = (current_iteration - self.nr_warmup_iterations) / self.total_iter
 
-        if tau <= self.ratio:
-            return self.function(tau)
+            if tau <= self.ratio:
+                return self.function(tau)
+            else:
+                return 1
         else:
-            return 1
+            return 0
 
 
 class CyclicalAnnealing:
@@ -62,10 +66,11 @@ class CyclicalAnnealing:
             function: Function used to increase β by, e.g. linear or sigmoid (default linear)
     """
 
-    def __init__(self, total_iter, cycles=4, ratio=0.5, function='linear'):
+    def __init__(self, total_iter, nr_warmup_iterations=0, cycles=4, ratio=0.5, function='linear'):
         self.total_iter = total_iter
         self.cycles = cycles
         self.ratio = ratio
+        self.nr_warmup_iterations = nr_warmup_iterations
 
         if function == 'linear':
             self.function = lambda tau: tau / ratio
@@ -75,10 +80,14 @@ class CyclicalAnnealing:
             raise ValueError('Invalid function, choose: "linear" or "sinusoidal"')
 
     def get_weight(self, current_iteration):
-        tau = current_iteration % math.ceil(self.total_iter/self.cycles)
-        tau /= self.total_iter/self.cycles
+        if current_iteration > self.nr_warmup_iterations:
+            iters_per_cycle = (self.total_iter - self.nr_warmup_iterations)/self.cycles
+            tau = (current_iteration - self.nr_warmup_iterations) % math.ceil(iters_per_cycle)
+            tau /= iters_per_cycle
 
-        if tau <= self.ratio:
-            return self.function(tau)
+            if tau <= self.ratio:
+                return self.function(tau)
+            else:
+                return 1
         else:
-            return 1
+            return 0

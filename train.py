@@ -38,6 +38,7 @@ params = {
     'CLIP_GRAD_NORM': 0,            # clip the gradient norm, setting to 0 ignores this
     'CLIP_GRAD_VAL': 0,             # clip the gradient value, setting to 0 ignores this
     'KL_LOSS_WEIGHT': 0.001,
+    'USE_CELL_LSTM_OUTPUT': False,
     'VAE': False,
     # Whether to weight the loss: with imbalanced vocabularies to how often the tokens occur
     'WEIGHTED_LOSS': False,
