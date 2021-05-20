@@ -254,23 +254,3 @@ class Bz2CsvLineReader():
         with bz2.BZ2File(self.filename, "r") as file:
             for i, row in enumerate(csv.reader(self._line_reader(file))):
                 yield row
-
-#     def readlines(self):
-#         with open(self.filename, 'rb') as file:
-#             for row in csv.reader(self._line_reader(file)):
-#                 yield row
-
-#     def _line_reader(self, file):
-#         buffer = ''
-#         decompressor = bz2.BZ2Decompressor()
-#         reader = partial(file.read, self.buffer_size)
-
-#         for bindata in iter(reader, b''):
-#             block = decompressor.decompress(bindata).decode('utf-8')
-#             buffer += block
-#             if '\n' in buffer:
-#                 lines = buffer.splitlines(True)
-#                 if lines:
-#                     buffer = '' if lines[-1].endswith('\n') else lines.pop()
-#                     for line in lines:
-#                         yield line
