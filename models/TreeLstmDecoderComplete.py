@@ -316,8 +316,9 @@ class TreeLstmDecoderComplete(nn.Module):
                                                                         # + self.offset_sibling(has_sibling[vocabs_mask == k])
                                                                         ), dim=-1) == label[tree_state.vocabs_mask == k].view(-1)).item()
                             
-                            pred_labels = torch.argmax(self.softmax(label_pred), dim=-1)
-                            print(iteration, sibling_index, pred_labels[pred_labels != label[tree_state.vocabs_mask == k].view(-1)].tolist(), pred_labels.tolist(), label[tree_state.vocabs_mask == k].view(-1).tolist()) #, self.softmax(label_pred).topk(3, sorted=True)[1], self.softmax(label_pred).topk(3, sorted=True)[0], h_pred[:, :5],)
+                            # print(h_pred[tree_state.vocabs_mask == k], parent_state, sibling_state)
+                            # pred_labels = torch.argmax(self.softmax(label_pred), dim=-1)
+                            # print(iteration, sibling_index, pred_labels[pred_labels != label[tree_state.vocabs_mask == k].view(-1)].tolist(), pred_labels.tolist(), label[tree_state.vocabs_mask == k].view(-1).tolist()) #, self.softmax(label_pred).topk(3, sorted=True)[1], self.softmax(label_pred).topk(3, sorted=True)[0], h_pred[:, :5],)
                         loss += label_loss #* max(-100 * iteration + 200, 1)
 
                         individual_losses[k] += label_loss.item()
@@ -393,6 +394,8 @@ class TreeLstmDecoderComplete(nn.Module):
                                     # Update the hidden and cell values matrices
                                     tree_state.h_s[i][tree_state.current_nodes_indices[tree_state.vocabs_mask == k]] = h_sibling_new
                                     tree_state.c_s[i][tree_state.current_nodes_indices[tree_state.vocabs_mask == k]] = c_sibling_new
+
+                # break
 
         return loss
 

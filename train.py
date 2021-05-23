@@ -119,6 +119,8 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
 
     non_res_tokens = len(tokens_paths) > 1
 
+    self.params['TOKEN_VOCABS'] = token_vocabs
+
     # weights_res = 1 / torch.tensor(list(token_vocabs['RES'].values()))
     # params['WEIGHTS_RES'] = weights_res / torch.sum(weights_res)
 

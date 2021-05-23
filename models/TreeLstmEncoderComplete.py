@@ -46,14 +46,15 @@ class TreeLstmEncoderComplete(nn.Module):
         adj_list = inp['adjacency_list']
         edge_order = inp['edge_order_bottomup']
         vocabs = inp['vocabs']
+        total_nodes = node_order.shape[0]
 
-        features = torch.zeros(node_order.shape[0], self.params['EMBEDDING_DIM'], device=self.device)
+        features = torch.zeros(total_nodes, self.params['EMBEDDING_DIM'], device=self.device)
         h = []
         c = []
 
         for _ in range(self.params['NUM_LSTM_LAYERS']):
-            h.append(torch.zeros(node_order.shape[0], self.hidden_size, device=self.device))
-            c.append(torch.zeros(node_order.shape[0], self.hidden_size, device=self.device))
+            h.append(torch.zeros(total_nodes, self.hidden_size, device=self.device))
+            c.append(torch.zeros(total_nodes, self.hidden_size, device=self.device))
         
         for k, embedding_layer in self.embedding_layers.items():
             if self.params['INDIV_LAYERS_VOCABS']:
@@ -106,7 +107,7 @@ class TreeLstmEncoderComplete(nn.Module):
         # tree_states = torch.cat([hidden, cell], dim=-1)
 
         for idx, tree_state in enumerate(torch.split(hidden, inp['tree_sizes'])):
-            hidden_roots[i] = torch.max(tree_state, dim=0)[0]
+            hidden_roots[idx] = torch.max(tree_state, dim=0)[0]
 
         # Get z_mean and z_log_var from hidden (parent roots only)
         z_mean = self.z_mean(hidden_roots)
@@ -117,10 +118,11 @@ class TreeLstmEncoderComplete(nn.Module):
         z = self.reparameterize(z_mean, z_log_var)
 
         if self.vae:
-            kl_loss = 0.5 * torch.sum(z_log_var.exp() - z_log_var - 1 + z_mean.pow(2))
+            kl_loss = (0.5 * torch.sum(z_log_var.exp() - z_log_var - 1 + z_mean.pow(2)))
+            # Make sure KL divergence is scaled the same as the reconstruction loss
+            kl_loss /= total_nodes
         else:
-            kl_loss = torch.tensor([0], device=self.device)
-
+            kl_loss = torch.tensor([0], device=self.device)        
         
         # Return latent vector, and mean and variance
         return z, kl_loss

@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from tqdm import tqdm
-# from tqdm import tqdm_notebook as tqdm
+import math
 import torch
 from torch import optim
 import torch.nn as nn
@@ -88,7 +88,11 @@ class Vae(nn.Module):
 
         self.train()
 
-        kl_scheduler = KLScheduling.CyclicalAnnealing(287*epochs, 300)
+        iterations = math.ceil((self.params['TOKEN_VOCABS']['RES']['root'] / self.params['BATCH_SIZE']) * epochs)
+
+        print(iterations)
+
+        kl_scheduler = KLScheduling.CyclicalAnnealing(iterations, nr_warmup_iterations=300)
 
         running_losses = {}
         loss_types_train = list(self.embedding_layers.keys()) + \
