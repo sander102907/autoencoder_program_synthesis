@@ -128,13 +128,13 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
                                max_tree_size=750, remove_non_res=not non_res_tokens,
                                nr_of_names_to_keep=params['TOP_NAMES_TO_KEEP'])
 
-    train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=128)
+    train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=params['BATCH_SIZE'])
 
     val_dataset = AstDataset(dataset_path_val, label_to_idx,
                              max_tree_size=750, remove_non_res=not non_res_tokens,
                              nr_of_names_to_keep=params['TOP_NAMES_TO_KEEP'])
 
-    val_dataset = BufferedShuffleDataset(val_dataset, buffer_size=128)
+    val_dataset = BufferedShuffleDataset(val_dataset, buffer_size=params['BATCH_SIZE'])
 
     train_loader = DataLoader(
         train_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
@@ -151,7 +151,7 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
     os.makedirs(save_dir, exist_ok=True)
 
     # Train
-    vae.train(params['EPOCHS'], train_loader, val_loader, save_dir)
+    vae.fit(params['EPOCHS'], train_loader, val_loader, save_dir)
 
 
 if __name__ == "__main__":

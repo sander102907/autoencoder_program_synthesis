@@ -5,7 +5,7 @@ import numpy as np
 from utils.TreeNode import Node
 from utils.Sampling import Sampling
 from time import time
-from model_utils.modules import AddGate, PredictiveHidden, TreeTopologyPred
+from model_utils.modules import AddGate, PredictiveHidden, TreeTopologyPred, MultiLayerLSTMCell
 from model_utils.state import TreeState
 
 # TODO make flag to combine output of LSTM cell and hidden state for predictive purposes or just take the hidden OR cell state
@@ -26,14 +26,14 @@ class TreeLstmDecoderComplete(nn.Module):
         self.latent2hidden = nn.Linear(self.latent_dim * 2 if params['USE_CELL_LSTM_OUTPUT'] else self.latent_dim, self.params['HIDDEN_SIZE'])
 
         # Doubly recurrent network layers: parent and sibling RNNs
-        self.lstms_parent = nn.ModuleList([])
-        self.lstms_sibling = nn.ModuleList([])
+        self.rnns_parent = MultiLayerLSTMCell(self.params['EMBEDDING_DIM'], self.params['HIDDEN_SIZE'], self.params['NUM_LSTM_LAYERS'])
+        self.rnns_sibling = MultiLayerLSTMCell(self.params['EMBEDDING_DIM'], self.params['HIDDEN_SIZE'], self.params['NUM_LSTM_LAYERS'])
 
-        self.pred_hidden_state = PredictiveHidden(self.latent_dim * 2 if params['USE_CELL_LSTM_OUTPUT'] else self.latent_dim)
+        self.pred_hidden_state = PredictiveHidden(self.params['HIDDEN_SIZE'] * 2 if params['USE_CELL_LSTM_OUTPUT'] else self.params['HIDDEN_SIZE'])
 
-        self.add_gate = AddGate(self.latent_dim * 2 if params['USE_CELL_LSTM_OUTPUT'] else self.latent_dim)
+        self.add_gate = AddGate(self.params['HIDDEN_SIZE'] * 2 if params['USE_CELL_LSTM_OUTPUT'] else self.params['HIDDEN_SIZE'])
 
-        self.tree_topology_pred = TreeTopologyPred(self.latent_dim * 2 if params['USE_CELL_LSTM_OUTPUT'] else self.latent_dim)
+        self.tree_topology_pred = TreeTopologyPred(self.params['HIDDEN_SIZE'] * 2 if params['USE_CELL_LSTM_OUTPUT'] else self.params['HIDDEN_SIZE'])
 
         # Learnable weights to incorporate topology information in label prediction
         self.offset_parent = nn.Linear(1, 1, bias=True)
@@ -65,15 +65,11 @@ class TreeLstmDecoderComplete(nn.Module):
         self.init_layers()
 
 
-    def init_layers(self):
-        # Initialize RNNs with num layers
-        for i in range(self.params['NUM_LSTM_LAYERS']):
-            if i == 0:
-                self.lstms_parent.append(nn.LSTMCell(self.params['EMBEDDING_DIM'], self.params['LATENT_DIM']))
-                self.lstms_sibling.append(nn.LSTMCell(self.params['EMBEDDING_DIM'], self.params['LATENT_DIM']))
-            else:
-                self.lstms_parent.append(nn.LSTMCell(self.params['LATENT_DIM'], self.params['LATENT_DIM']))
-                self.lstms_sibling.append(nn.LSTMCell(self.params['LATENT_DIM'], self.params['LATENT_DIM']))
+    def init_layers(self):       
+        if self.params['USE_CELL_LSTM_OUTPUT']:
+            hidden_size = self.params['HIDDEN_SIZE'] * 2
+        else:
+            hidden_size = self.params['HIDDEN_SIZE']
 
 
         # Initialize prediction layers, loss functions, leaf sibling LSTMs
@@ -86,7 +82,7 @@ class TreeLstmDecoderComplete(nn.Module):
             if k == 'NAME':
                 # For name tokens we predict reusable IDs of predefined size instead of actual tokens
                 self.prediction_layers[k] = nn.Linear(
-                    self.latent_dim * 2 if self.params['USE_CELL_LSTM_OUTPUT'] else self.latent_dim,
+                    hidden_size,
                     self.params['TOP_NAMES_TO_KEEP'] + self.params['NAME_ID_VOCAB_SIZE'])
 
                 # Name token cross entropy loss
@@ -98,13 +94,13 @@ class TreeLstmDecoderComplete(nn.Module):
                 # for calculating softmax with highly imbalanced vocabs
                 # cutoffs: 10: 71.1%, 11-100: 18.8%, 101-1000: 7.8%, rest: 2.2%
                 self.label_losses[k] = nn.AdaptiveLogSoftmaxWithLoss(
-                    self.latent_dim * 2 if self.params['USE_CELL_LSTM_OUTPUT'] else self.latent_dim,
+                    hidden_size,
                     self.params[f'{k}_VOCAB_SIZE'], cutoffs=[10, 100, 1000], div_value=3.0)
 
             else:
                 # Prediction layer for RES and LITERAL tokens
                 self.prediction_layers[k] = nn.Linear(
-                    self.latent_dim * 2 if self.params['USE_CELL_LSTM_OUTPUT'] else self.latent_dim, 
+                    hidden_size, 
                     self.params[f'{k}_VOCAB_SIZE'])
 
                 # RES and LITERAL cross entropy loss
@@ -197,18 +193,22 @@ class TreeLstmDecoderComplete(nn.Module):
                 h_parent, c_parent = torch.split(hidden, int(hidden.shape[-1]/2), dim=-1)
             else:
                 h_parent = hidden
-                c_parent = torch.zeros((z.shape[0], self.params['LATENT_DIM']), device=self.device)
+                c_parent = torch.zeros((z.shape[0], self.params['HIDDEN_SIZE']), device=self.device)
 
-            emb_label = self.embedding_layers['RES'](tree_state.features[tree_state.node_order == 0]).view(-1, self.params['EMBEDDING_DIM'])
+            # TODO this should be what we are supposed to do, but what we do below seems to be working better
+            # emb_label = self.embedding_layers['RES'](tree_state.features[tree_state.node_order == 0]).view(-1, self.params['EMBEDDING_DIM'])
 
-            # Compute hidden and cell values of current nodes
+            # hidden_states = [(h_parent, c_parent) for _ in range(self.params['NUM_LSTM_LAYERS'])]
+            # new_parent_states = self.rnns_parent(emb_label, hidden_states)
+
+            # for idx, state in enumerate(new_parent_states):    
+            #     tree_state.h_p[idx][tree_state.node_order == 0] = state[0]
+            #     tree_state.c_p[idx][tree_state.node_order == 0] = state[1]
+
+
+            # FOR SOME REASON THIS SEEMS TO BE WORKING BETTER
             for i in range(self.params['NUM_LSTM_LAYERS']):
-                if i == 0:
-                    h_parent_new, c_parent_new = self.lstms_parent[i](emb_label, (h_parent, c_parent))
-                else:
-                    h_parent_new, c_parent_new = self.lstms_parent[i](h_parent_new, (h_parent, c_parent))
-
-                # Update the hidden and cell values matrices
+            #     # Update the hidden and cell values matrices
                 tree_state.h_p[i][tree_state.node_order == 0] = h_parent
                 tree_state.c_p[i][tree_state.node_order == 0] = c_parent
 
@@ -229,8 +229,6 @@ class TreeLstmDecoderComplete(nn.Module):
             # For the next sibling
             for sibling_index in range(largest_num_siblings):
                 tree_state.update_hidden_values(iteration, sibling_index, first_sibling_indices, parent_indices)
-
-                # print(tree_state.h_parent)
 
                 # Combine hidden and cell states from last RNN layer
                 if self.params['USE_CELL_LSTM_OUTPUT']:
@@ -258,11 +256,11 @@ class TreeLstmDecoderComplete(nn.Module):
                 depth_pred, width_pred, res_pred = self.tree_topology_pred(h_pred)
 
                 # Calculate parent and sibling loss
-                parent_loss = self.bce_loss(depth_pred, tree_state.is_parent) / tree_state.total_nodes
-                sibling_loss = self.bce_loss(width_pred, tree_state.has_sibling) / tree_state.total_nodes
+                parent_loss = self.bce_loss(depth_pred, tree_state.is_parent) # / tree_state.total_nodes
+                sibling_loss = self.bce_loss(width_pred, tree_state.has_sibling) # / tree_state.total_nodes
 
                 # calculate res prediction loss
-                res_loss = self.bce_loss(res_pred, tree_state.is_res) / tree_state.total_nodes
+                res_loss = self.bce_loss(res_pred, tree_state.is_res) # / tree_state.total_nodes
 
                 loss += parent_loss + sibling_loss + res_loss
 
@@ -295,7 +293,7 @@ class TreeLstmDecoderComplete(nn.Module):
                             label_pred, label_loss = self.label_losses[k](
                                 h_pred[tree_state.vocabs_mask == k], label[tree_state.vocabs_mask == k].view(-1))
 
-                            label_loss /= sum(tree_state.vocabs== k)
+                            # label_loss /= sum(tree_state.vocabs== k)
 
                             accuracies[k] += sum(self.label_losses[k].predict(h_pred[tree_state.vocabs_mask == k])
                                                 == label[tree_state.vocabs_mask == k].view(-1)).item()
@@ -308,7 +306,7 @@ class TreeLstmDecoderComplete(nn.Module):
                             label_loss = self.label_losses[k]((label_pred
                                                             # + self.offset_parent(is_parent[vocabs_mask == k])
                                                             # + self.offset_sibling(has_sibling[vocabs_mask == k])
-                                                            ), label[tree_state.vocabs_mask == k].view(-1)) / sum(tree_state.vocabs == k)
+                                                            ), label[tree_state.vocabs_mask == k].view(-1)) # / sum(tree_state.vocabs == k)
 
 
                             accuracies[k] += sum(torch.argmax(self.softmax(label_pred
@@ -332,40 +330,24 @@ class TreeLstmDecoderComplete(nn.Module):
                         emb_label = self.embedding_layers[k](
                             label[tree_state.vocabs_mask == k]).view(-1, embedding_dim)
 
+
+                        parent_states = []
+                        sibling_states = []
+
+                        # Get the hidden and cell values of parents and previous siblings
+                        for i in range(self.params['NUM_LSTM_LAYERS']):
+                            parent_state_hidden = tree_state.h_parent[i][tree_state.vocabs_mask == k]
+                            parent_state_cell = tree_state.c_parent[i][tree_state.vocabs_mask == k]
+                            parent_states.append((parent_state_hidden, parent_state_cell))
+
+                            sibling_state_hidden = tree_state.h_prev_sibling[i][tree_state.vocabs_mask == k]
+                            sibling_state_cell = tree_state.c_prev_sibling[i][tree_state.vocabs_mask == k]
+                            sibling_states.append((sibling_state_hidden, sibling_state_cell))
+
                         if 'RES' in k:
-                            for i in range(self.params['NUM_LSTM_LAYERS']):
-                                # Compute hidden and cell values of current nodes
-                                if i == 0:
-                                    h_parent_new, c_parent_new = self.lstms_parent[i](
-                                        emb_label,
-                                        (tree_state.h_parent[i][tree_state.vocabs_mask == k],
-                                         tree_state.c_parent[i][tree_state.vocabs_mask == k])
-                                    )
-
-                                    h_sibling_new, c_sibling_new = self.lstms_sibling[i](
-                                        emb_label,
-                                        (tree_state.h_prev_sibling[i][tree_state.vocabs_mask == k],
-                                         tree_state.c_prev_sibling[i][tree_state.vocabs_mask == k])
-                                    )
-                                else:
-                                    h_parent_new, c_parent_new = self.lstms_parent[i](
-                                        h_parent_new, 
-                                        (tree_state.h_parent[i][tree_state.vocabs_mask == k], 
-                                         tree_state.c_parent[i][tree_state.vocabs_mask == k])
-                                    )
-
-                                    h_sibling_new, c_sibling_new = self.lstms_sibling[i](
-                                        h_sibling_new, 
-                                        (tree_state.h_prev_sibling[i][tree_state.vocabs_mask == k], 
-                                         tree_state.c_prev_sibling[i][tree_state.vocabs_mask == k])
-                                    )
-
-                                # Update the hidden and cell values matrices
-                                tree_state.h_p[i][tree_state.current_nodes_indices[tree_state.vocabs_mask == k]] = h_parent_new
-                                tree_state.c_p[i][tree_state.current_nodes_indices[tree_state.vocabs_mask == k]] = c_parent_new
-
-                                tree_state.h_s[i][tree_state.current_nodes_indices[tree_state.vocabs_mask == k]] = h_sibling_new
-                                tree_state.c_s[i][tree_state.current_nodes_indices[tree_state.vocabs_mask == k]] = c_sibling_new
+                            # Compute hidden and cell values of current nodes
+                            new_parent_states = self.rnns_parent(emb_label, parent_states)
+                            new_sibling_states = self.rnns_sibling(emb_label, sibling_states)
 
                         else:
                             # Compute hidden and cell values of current nodes for previous siblings only (since we are not parents in the leafs)
@@ -376,27 +358,18 @@ class TreeLstmDecoderComplete(nn.Module):
                                      tree_state.c_prev_sibling[tree_state.vocabs_mask == k])
                                 )
                             else:
-                                for i in range(self.params['NUM_LSTM_LAYERS']):
-                                    if i == 0:
-                                        h_sibling_new, c_sibling_new = self.lstms_sibling[i](
-                                            emb_label, 
-                                            (tree_state.h_prev_sibling[i][tree_state.vocabs_mask == k], 
-                                             tree_state.c_prev_sibling[i][tree_state.vocabs_mask == k])
-                                        )
+                                new_parent_states = [None for _ in range(self.params['NUM_LSTM_LAYERS'])]
+                                new_sibling_states = self.rnns_sibling(emb_label, sibling_states)
+                        
+                        # Update the hidden and cell values matrices
+                        state_mask = tree_state.current_nodes_indices[tree_state.vocabs_mask == k]
+                        for idx, (p_state, s_state) in enumerate(zip(new_parent_states, new_sibling_states)):
+                            if 'RES' in k:
+                                tree_state.h_p[idx][state_mask] = p_state[0]
+                                tree_state.c_p[idx][state_mask] = p_state[1]
 
-                                    else:
-                                        h_sibling_new, c_sibling_new = self.lstms_sibling[i](
-                                            h_sibling_new, 
-                                            (tree_state.h_prev_sibling[i][tree_state.vocabs_mask == k], 
-                                             tree_state.c_prev_sibling[i][tree_state.vocabs_mask == k])
-                                        )
-
-                                    # Update the hidden and cell values matrices
-                                    tree_state.h_s[i][tree_state.current_nodes_indices[tree_state.vocabs_mask == k]] = h_sibling_new
-                                    tree_state.c_s[i][tree_state.current_nodes_indices[tree_state.vocabs_mask == k]] = c_sibling_new
-
-                # break
-
+                            tree_state.h_s[idx][state_mask] = s_state[0]
+                            tree_state.c_s[idx][state_mask] = s_state[1]
         return loss
 
 

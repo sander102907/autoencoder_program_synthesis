@@ -120,7 +120,7 @@ class TreeLstmEncoderComplete(nn.Module):
         if self.vae:
             kl_loss = (0.5 * torch.sum(z_log_var.exp() - z_log_var - 1 + z_mean.pow(2)))
             # Make sure KL divergence is scaled the same as the reconstruction loss
-            kl_loss /= total_nodes
+            # kl_loss /= total_nodes
         else:
             kl_loss = torch.tensor([0], device=self.device)        
         

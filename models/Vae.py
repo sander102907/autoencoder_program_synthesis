@@ -90,8 +90,6 @@ class Vae(nn.Module):
 
         iterations = math.ceil((self.params['TOKEN_VOCABS']['RES']['root'] / self.params['BATCH_SIZE']) * epochs)
 
-        print(iterations)
-
         kl_scheduler = KLScheduling.CyclicalAnnealing(iterations, nr_warmup_iterations=300)
 
         running_losses = {}

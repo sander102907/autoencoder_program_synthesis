@@ -96,3 +96,47 @@ class LstmAttention(nn.Module):
         # print(u.shape, a.shape, v.shape, (a * inp))
 
         return a * inp
+
+
+class MultiLayerLSTMCell(nn.Module):
+    """
+        A long short-term memory (LSTM) cell with support for multiple layers.
+
+        input_size: The number of expected features in the input
+        hidden_size: The number of features in the hidden state
+        num_layers: Number of recurrent layers.
+                    E.g., setting num_layers=2 would mean stacking two LSTM cells together
+                    to form a stacked LSTM cell, with the second LSTM cell taking in outputs of
+                    the first LSTM cell and computing the final results. Default: 1
+    """
+
+    def __init__(self, input_size, hidden_size, num_layers = 1):
+        super().__init__()
+
+        self.num_layers = num_layers
+        self.rnns = nn.ModuleList([])
+
+        # Initialize RNNs with num layers
+        for i in range(num_layers):
+            if i == 0:
+                self.rnns.append(nn.LSTMCell(input_size, hidden_size))
+            else:
+                self.rnns.append(nn.LSTMCell(hidden_size, hidden_size))
+
+
+    def forward(self, input, hidden_states):
+        new_hidden_states = []
+
+        for i in range(self.num_layers):
+            if i == 0:
+                rnn_state = self.rnns[i](input, hidden_states[i])
+            else:
+                rnn_state = self.rnns[i](rnn_state, hidden_states[i])
+
+            new_hidden_states.append(rnn_state)
+
+        return new_hidden_states
+
+        
+
+        

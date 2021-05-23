@@ -42,12 +42,12 @@ class TreeState:
     def init_states(self):
         for _ in range(self.params['NUM_LSTM_LAYERS']):
             # h and c states for every node in the batch for parent lstm
-            self.h_p.append(torch.zeros(self.total_nodes, self.params['LATENT_DIM'], device=self.device))
-            self.c_p.append(torch.zeros(self.total_nodes, self.params['LATENT_DIM'], device=self.device))
+            self.h_p.append(torch.zeros(self.total_nodes, self.params['HIDDEN_SIZE'], device=self.device))
+            self.c_p.append(torch.zeros(self.total_nodes, self.params['HIDDEN_SIZE'], device=self.device))
 
             # h and c states for every node in the batch for sibling lstm
-            self.h_s.append(torch.zeros(self.total_nodes, self.params['LATENT_DIM'], device=self.device))
-            self.c_s.append(torch.zeros(self.total_nodes, self.params['LATENT_DIM'], device=self.device))
+            self.h_s.append(torch.zeros(self.total_nodes, self.params['HIDDEN_SIZE'], device=self.device))
+            self.c_s.append(torch.zeros(self.total_nodes, self.params['HIDDEN_SIZE'], device=self.device))
 
 
     def update_hidden_values(self, iteration, sibling_index, first_sibling_indices, parent_indices):
@@ -64,7 +64,7 @@ class TreeState:
             self.h_prev_sibling = []
             self.c_prev_sibling = []
 
-            init_state = torch.zeros(num_first_siblings, self.params['LATENT_DIM'], device=self.device)
+            init_state = torch.zeros(num_first_siblings, self.params['HIDDEN_SIZE'], device=self.device)
             for i in range(self.params['NUM_LSTM_LAYERS']):
                 self.h_prev_sibling.append(init_state)
                 self.c_prev_sibling.append(init_state)
