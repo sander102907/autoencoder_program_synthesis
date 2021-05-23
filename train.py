@@ -28,12 +28,12 @@ while True:
 params = {
     'LEAF_EMBEDDING_DIM': 100,
     'EMBEDDING_DIM': 50,
-    'HIDDEN_SIZE': 48,
-    'LATENT_DIM': 48,
-    'LEARNING_RATE': 1e-3,
+    'HIDDEN_SIZE': 200,
+    'LATENT_DIM': 100,
+    'LEARNING_RATE': 1e-4,
     'NUM_LSTM_LAYERS': 2,
-    'EPOCHS': 30,
-    'BATCH_SIZE': 64,
+    'EPOCHS': 10,
+    'BATCH_SIZE': 128,
     'NUM_WORKERS': 8,
     'CLIP_GRAD_NORM': 0,            # clip the gradient norm, setting to 0 ignores this
     'CLIP_GRAD_VAL': 0,             # clip the gradient value, setting to 0 ignores this
@@ -119,7 +119,7 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
 
     non_res_tokens = len(tokens_paths) > 1
 
-    self.params['TOKEN_VOCABS'] = token_vocabs
+    params['TOKEN_VOCABS'] = token_vocabs
 
     # weights_res = 1 / torch.tensor(list(token_vocabs['RES'].values()))
     # params['WEIGHTS_RES'] = weights_res / torch.sum(weights_res)
@@ -142,7 +142,7 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
         val_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
 
     # set model
-    vae = Vae(device, params)
+    vae = Vae(device, params).to(device)
 
     save_dir = 'checkpoints/' + f'{params["LATENT_DIM"]}latent' + f'_{params["HIDDEN_SIZE"]}hidden' + \
         f'{"_weightedloss" if params["WEIGHTED_LOSS"] else ""}' + \
@@ -156,12 +156,12 @@ def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=Fal
 
 if __name__ == "__main__":
     tokens_paths = {
-        'RES': '../data/ast_trees_full_22-04-2021/reserved_tokens/',
-        'NAME': '../data/ast_trees_full_22-04-2021/name_tokens/',
-        'TYPE': '../data/ast_trees_full_22-04-2021/type_tokens/',
-        'LITERAL': '../data/ast_trees_full_22-04-2021/literal_tokens/',
+        'RES': '../data/ast_trees_full_19-05-2021/reserved_tokens/',
+        'NAME': '../data/ast_trees_full_19-05-2021/name_tokens/',
+        'TYPE': '../data/ast_trees_full_19-05-2021/type_tokens/',
+        'LITERAL': '../data/ast_trees_full_19-05-2021/literal_tokens/',
     }
-    dataset_path_train = '../data/ast_trees_full_22-04-2021/asts_train/'
-    dataset_path_val = '../data/ast_trees_full_22-04-2021/asts_val/'
+    dataset_path_train = '../data/ast_trees_full_19-05-2021/asts_train/'
+    dataset_path_val = '../data/ast_trees_full_19-05-2021/asts_val/'
 
     train(dataset_path_train, dataset_path_val, tokens_paths)
