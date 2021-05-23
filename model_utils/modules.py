@@ -131,7 +131,7 @@ class MultiLayerLSTMCell(nn.Module):
             if i == 0:
                 rnn_state = self.rnns[i](input, hidden_states[i])
             else:
-                rnn_state = self.rnns[i](rnn_state, hidden_states[i])
+                rnn_state = self.rnns[i](rnn_state[0], hidden_states[i])
 
             new_hidden_states.append(rnn_state)
 

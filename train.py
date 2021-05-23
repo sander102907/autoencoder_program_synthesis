@@ -31,7 +31,7 @@ params = {
     'HIDDEN_SIZE': 200,
     'LATENT_DIM': 100,
     'LEARNING_RATE': 1e-4,
-    'NUM_LSTM_LAYERS': 2,
+    'NUM_LSTM_LAYERS': 1,
     'EPOCHS': 10,
     'BATCH_SIZE': 128,
     'NUM_WORKERS': 8,
@@ -39,7 +39,7 @@ params = {
     'CLIP_GRAD_VAL': 0,             # clip the gradient value, setting to 0 ignores this
     'KL_LOSS_WEIGHT': 0.001,
     'USE_CELL_LSTM_OUTPUT': False,
-    'VAE': False,
+    'VAE': True,
     # Whether to weight the loss: with imbalanced vocabularies to how often the tokens occur
     'WEIGHTED_LOSS': False,
     # Whether to use individual LSTM layers for each of the different vocabularies
