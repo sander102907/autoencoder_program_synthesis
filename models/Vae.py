@@ -314,10 +314,10 @@ class Vae(nn.Module):
 
         checkpoint = torch.load(path)
 
-        self.encoder.load_state_dict(checkpoint['encoder_state_dict'])
-        self.decoder.load_state_dict(checkpoint['decoder_state_dict'])
-        self.encoder_optimizer.load_state_dict(
-            checkpoint['encoder_optimizer_state_dict'])
-        self.decoder_optimizer.load_state_dict(
-            checkpoint['decoder_optimizer_state_dict'])
+        self.load_state_dict(checkpoint['state_dict'])
+        # self.decoder.load_state_dict(checkpoint['decoder_state_dict'])
+        self.optimizer.load_state_dict(
+            checkpoint['optimizer_state_dict'])
+        # self.decoder_optimizer.load_state_dict(
+        #     checkpoint['decoder_optimizer_state_dict'])
         self.losses = checkpoint['losses']
