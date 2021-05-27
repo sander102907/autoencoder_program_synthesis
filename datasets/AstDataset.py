@@ -122,8 +122,8 @@ class AstDataset(IterableDataset):
 
         return nodes, depths
 
-    def get_amt_nodes(self, root, nodes=0, iteration = 1):
-        if 'children' in root: #and iteration < 2:
+    def get_amt_nodes(self, root, nodes=0):
+        if 'children' in root:
             to_remove = []
             for child in root['children']:
                 # if child['res'] and not 'children' in child:
@@ -133,7 +133,7 @@ class AstDataset(IterableDataset):
                 if not child['res'] and 'children' in child and not self.remove_non_res:
                     to_remove.append(child)
                 if child['res'] or not self.remove_non_res:
-                    nodes += self.get_amt_nodes(child, 0, iteration + 1)
+                    nodes += self.get_amt_nodes(child, 0)
                 else:
                     to_remove.append(child)
 
@@ -142,21 +142,21 @@ class AstDataset(IterableDataset):
 
         return nodes + 1
 
-    def get_max_depth(self, root, iteration = 1):
-        if 'children' in root: # and iteration < 2:
-            return 1 + max(self.get_max_depth(child, iteration + 1) for child in root['children'])
+    def get_max_depth(self, root):
+        if 'children' in root:
+            return 1 + max(self.get_max_depth(child) for child in root['children'])
         else:
             return 1
 
-    def _label_node_index(self, node, n=0, iteration = 1):
+    def _label_node_index(self, node, n=0):
         node['index'] = n
-        if 'children' in node: # and iteration < 2:
+        if 'children' in node:
             for child in node['children']:
                 n += 1
-                n = self._label_node_index(child, n, iteration + 1)
+                n = self._label_node_index(child, n)
         return n
 
-    def _gather_node_attributes(self, node, key, parent=None, nameid_to_placeholderid=None, iteration = 1):
+    def _gather_node_attributes(self, node, key, parent=None, nameid_to_placeholderid=None):
         if nameid_to_placeholderid is None:
             nameid_to_placeholderid = {}
 
@@ -194,21 +194,21 @@ class AstDataset(IterableDataset):
 
         features = [[torch.tensor([feature])]]
         vocabs = [vocab]
-        if 'children' in node: # and iteration < 2:
+        if 'children' in node:
             for child in node['children']:
                 feature, vocab, nameid_to_placeholderid = self._gather_node_attributes(
-                    child, key, node, nameid_to_placeholderid, iteration + 1)
+                    child, key, node, nameid_to_placeholderid)
                 features.extend(feature)
                 vocabs += vocab
 
         return features, vocabs, nameid_to_placeholderid
 
-    def _gather_adjacency_list(self, node, iteration = 1):
+    def _gather_adjacency_list(self, node):
         adjacency_list = []
-        if 'children' in node: # and iteration < 2:
+        if 'children' in node:
             for child in node['children']:
                 adjacency_list.append([node['index'], child['index']])
-                adjacency_list.extend(self._gather_adjacency_list(child, iteration + 1))
+                adjacency_list.extend(self._gather_adjacency_list(child))
 
         return adjacency_list
 

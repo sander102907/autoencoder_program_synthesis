@@ -49,10 +49,10 @@ class Sampling:
     @classmethod
     def _filter_top_p(cls, logits, top_p):
         """
-            Set logits below the top-p proability mass to -inf so softmax sets their probability to 0
+            Set logits above the top-p proability mass to -inf so softmax sets their probability to 0
         """
 
-        if top_p > 0:
+        if top_p > 0.0:
             # Sort the logits
             sorted_logits, sorted_indices = torch.sort(logits, descending=True)
 
@@ -66,11 +66,11 @@ class Sampling:
             sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
             sorted_indices_to_remove[..., 0] = 0
 
-            # Get the indices of the logits below the top-p logits
-            indices_below_top_p = sorted_indices[sorted_indices_to_remove]
+            # scatter sorted tensors to original indexing and get the indices of the logits below the top-p logits
+            indices_above_top_p = sorted_indices_to_remove.scatter(dim=1, index=sorted_indices, src=sorted_indices_to_remove)
 
             # Set the logits below the top-p logits to -infinity so softmax gives them probability 0
-            logits[indices_below_top_p] = float('-inf')
+            logits[indices_above_top_p] = float('-inf')
             
         return logits
 
@@ -81,12 +81,16 @@ class Sampling:
             Get sample from logits with temperature control and nucleus filtering (top-k and top-p)
         """
 
-        logits /= temperature
-        
-        logits = cls._filter_top_k(logits, top_k)
-        logits = cls._filter_top_p(logits, top_p)
+        if logits.shape[0] > 0:
+            logits /= temperature
+            
+            logits = cls._filter_top_k(logits, top_k)
+            logits = cls._filter_top_p(logits, top_p)
 
-        return cls._get_sample(logits)
+            return cls._get_sample(logits)
+        else:
+            # Return empty long tensor if logits are empty
+            return torch.empty(0, dtype=torch.long, device=logits.device)
 
         
 
