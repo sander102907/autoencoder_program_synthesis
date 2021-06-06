@@ -28,7 +28,7 @@ class TreeLSTM(torch.nn.Module):
         self.W_f = torch.nn.Linear(self.in_features, self.out_features)
         self.U_f = torch.nn.Linear(self.out_features, self.out_features, bias=False)
 
-    def forward(self, features, node_order, adjacency_list, edge_order, h, c, start_iteration):
+    def forward(self, features, node_order, adjacency_list, edge_order, h, c):
         '''Run TreeLSTM model on a tree data structure with node features
 
         Takes Tensors encoding node features, a tree node adjacency_list, and the order in which 
@@ -36,7 +36,7 @@ class TreeLSTM(torch.nn.Module):
         '''
 
         # populate the h and c states respecting computation order
-        for n in range(start_iteration, node_order.max() + 1):
+        for n in range(node_order.max() + 1):
             self._run_lstm(n, h, c, features, node_order, adjacency_list, edge_order)
 
         return h, c

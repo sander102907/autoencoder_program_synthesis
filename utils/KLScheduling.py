@@ -9,11 +9,15 @@ class ConstantAnnealing:
             kl_weight: β value
     """
 
-    def __init__(self, kl_weight=1):
+    def __init__(self, nr_warmup_iterations=0, kl_weight=1):
         self.kl_weight = kl_weight
+        self.nr_warmup_iterations = nr_warmup_iterations
 
     def get_weight(self, current_iteration):
-        return self.kl_weight
+        if current_iteration > self.nr_warmup_iterations:
+            return self.kl_weight
+        else:
+            return 0
 
 
 class MonotonicAnnealing:

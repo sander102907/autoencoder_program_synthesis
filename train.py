@@ -1,17 +1,23 @@
-from loss_functions.TreeVaeLoss import TreeVaeLoss, TreeVaeLossComplete
 from models.Vae import Vae
 from utils.TreeLstmUtils import batch_tree_input
 from datasets.AstDataset import AstDataset
+import utils.KLScheduling as KLScheduling
 import os
 import json
 import csv
 import torch
+import math
 from torch.utils.data import DataLoader, BufferedShuffleDataset
 import sys
-torch.multiprocessing.set_sharing_strategy('file_system')
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from model_utils.vocabulary import Vocabulary
+from torch import optim
+from config.vae_config import ex
 
+torch.multiprocessing.set_sharing_strategy('file_system')
 maxInt = sys.maxsize
+
+# Device configuration
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 while True:
     # decrease the maxInt value by factor 10
@@ -24,144 +30,142 @@ while True:
         maxInt = int(maxInt/10)
 
 
-# HYPERPARAMETERS
-params = {
-    'LEAF_EMBEDDING_DIM': 100,
-    'EMBEDDING_DIM': 50,
-    'HIDDEN_SIZE': 200,
-    'LATENT_DIM': 100,
-    'LEARNING_RATE': 1e-4,
-    'NUM_LSTM_LAYERS': 1,
-    'EPOCHS': 10,
-    'BATCH_SIZE': 128,
-    'NUM_WORKERS': 8,
-    'CLIP_GRAD_NORM': 0,            # clip the gradient norm, setting to 0 ignores this
-    'CLIP_GRAD_VAL': 0,             # clip the gradient value, setting to 0 ignores this
-    'KL_LOSS_WEIGHT': 0.001,
-    'USE_CELL_LSTM_OUTPUT': False,
-    'VAE': True,
-    # Whether to weight the loss: with imbalanced vocabularies to how often the tokens occur
-    'WEIGHTED_LOSS': False,
-    # Whether to use individual LSTM layers for each of the different vocabularies
-    'INDIV_LAYERS_VOCABS': False,
-    # TODO: implement teacher forcing ratio -> does it make sense, e.g. predicted func decl but should be var decl then how does it work with children?
-    'TEACHER_FORCING_RATIO': 0.5,
-    'TOP_NAMES_TO_KEEP': 300,
-    # vocabulary size for name tokens which are mapped to non-unique IDs should be high enough to cover all programs
-    'NAME_ID_VOCAB_SIZE': 100,
-    'SAVE_PER_BATCHES': 1000
-}
+class Trainer:
+    def __init__(self):
+        self.vocabulary = self.get_vocabulary()
+        self.loss_weights = self.get_loss_weights()
+        self.model = self.make_model()
+        self.set_optimizer()
+        self.load_model()
+        self.kl_scheduler = self.get_kl_scheduler()
+        self.train_dataset, self.val_dataset, self.test_dataset = self.get_datasets()
+        self.train_loader, self.val_loader, self.test_loader = self.get_dataloaders()
 
 
-def load_token_vocabulary(path):
-    if os.path.isfile(path):
-        # Load the reserved tokens dictionary
-        with open(path, 'r') as json_f:
-            json_data = json_f.read()
+    @ex.capture
+    def make_model(self):
+        model = Vae(device, self.vocabulary, self.loss_weights).to(device)
+        return model
 
-        # To JSON format (dictionary)
-        tokens = json.loads(json_data)
+    @ex.capture
+    def set_optimizer(self, learning_rate):
+        optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.model.set_optimizer(optimizer)
+        return optimizer
 
-    else:
-        tokens = {}
-
-        for dirpath, _, files in os.walk(path):
-            for file in files:
-                if file.endswith('.json'):
-                    with open(os.path.join(dirpath, file), 'r') as json_f:
-                        json_data = json_f.read()
-
-                    # To JSON format (dictionary)
-                    for k, v in json.loads(json_data).items():
-                        if k in tokens:
-                            tokens[k] += v
-                        else:
-                            tokens[k] = v
-
-    return tokens
+    @ex.capture
+    def load_model(self, pretrained_model):
+        self.model.load_model(pretrained_model)
 
 
-def train(dataset_path_train, dataset_path_val, tokens_paths=None, tokenized=False):
-    token_vocabs = {}
-    label_to_idx = None
-    idx_to_label = None
+    @ex.capture
+    def get_vocabulary(self, tokens_paths, max_name_tokens, reusable_name_tokens):
+        max_tokens = {
+            'RES': None,
+            'NAME': max_name_tokens + reusable_name_tokens,
+            'TYPE': None,
+            'LITERAL': None
+        }
 
-    for k, path in tokens_paths.items():
-        token_vocabs[k] = load_token_vocabulary(path)
-        params[f'{k}_VOCAB_SIZE'] = len(token_vocabs[k])
+        vocabulary = Vocabulary(tokens_paths, max_tokens)
 
-        if params['WEIGHTED_LOSS']:
-            loss_weights = 1 / torch.tensor(list(token_vocabs[k].values()))
-            params[f'{k}_WEIGHTS'] = loss_weights / \
-                torch.sum(loss_weights) * len(token_vocabs[k]) * 1000
-        else:
-            if k == 'NAME':
-                params[f'{k}_WEIGHTS'] = torch.ones(
-                    params['TOP_NAMES_TO_KEEP'] + params['NAME_ID_VOCAB_SIZE'])
+        return vocabulary        
+
+    @ex.capture
+    def get_loss_weights(self, weighted_loss):
+        loss_weights = {}
+
+        for vocab_type, token_counts in self.vocabulary.token_counts.items():
+            if weighted_loss:
+                counts = torch.tensor(list(token_counts.values())[:self.vocabulary.get_vocab_size(vocab_type)])
+                loss_weights[vocab_type] = (torch.min(counts, dim=-1)[0] / counts) * torch.max(counts, dim=-1)[0]
             else:
-                params[f'{k}_WEIGHTS'] = torch.ones(len(token_vocabs[k]))
+                loss_weights[vocab_type] = torch.ones(self.vocabulary.get_vocab_size(vocab_type))
 
-    os.makedirs('output/', exist_ok=True)
+        return loss_weights
 
-    if not tokenized:
-        label_to_idx = {}
-        idx_to_label = {}
-        for k, vocab in token_vocabs.items():
-            vocab = dict(sorted(vocab.items(), key=lambda x:x[1], reverse=True))
-            label_to_idx[k] = {k: i for i, k in enumerate(vocab.keys())}
-            idx_to_label[k] = {v: k for k, v in label_to_idx[k].items()}
 
-            # Save to file to be used when transforming back to code
-            json_f = json.dumps(label_to_idx[k])
-            f = open(f'output/{k}_tokens.json', 'w')
-            f.write(json_f)
-            f.close()
+    @ex.capture
+    def get_datasets(self, dataset_paths, max_tree_size, max_name_tokens, batch_size):
+        train_dataset = AstDataset(dataset_paths['TRAIN'], self.vocabulary, max_tree_size, max_name_tokens)
+        train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=batch_size)
 
-    non_res_tokens = len(tokens_paths) > 1
+        val_dataset = AstDataset(dataset_paths['VAL'], self.vocabulary, max_tree_size, max_name_tokens)
+        val_dataset = BufferedShuffleDataset(val_dataset, buffer_size=batch_size)
 
-    params['TOKEN_VOCABS'] = token_vocabs
+        test_dataset = AstDataset(dataset_paths['TEST'], self.vocabulary, max_tree_size, max_name_tokens)
+        test_dataset = BufferedShuffleDataset(test_dataset, buffer_size=batch_size)
 
-    # weights_res = 1 / torch.tensor(list(token_vocabs['RES'].values()))
-    # params['WEIGHTS_RES'] = weights_res / torch.sum(weights_res)
+        return train_dataset, val_dataset, test_dataset
 
-    train_dataset = AstDataset(dataset_path_train, label_to_idx,
-                               max_tree_size=750, remove_non_res=not non_res_tokens,
-                               nr_of_names_to_keep=params['TOP_NAMES_TO_KEEP'])
 
-    train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=params['BATCH_SIZE'])
+    @ex.capture
+    def get_dataloaders(self, batch_size, num_workers):
+        train_loader = DataLoader(
+            self.train_dataset,
+            batch_size=batch_size,
+            collate_fn=batch_tree_input,
+            num_workers=num_workers)
 
-    val_dataset = AstDataset(dataset_path_val, label_to_idx,
-                             max_tree_size=750, remove_non_res=not non_res_tokens,
-                             nr_of_names_to_keep=params['TOP_NAMES_TO_KEEP'])
+        val_loader = DataLoader(
+            self.val_dataset,
+            batch_size=batch_size,
+            collate_fn=batch_tree_input,
+            num_workers=num_workers)
 
-    val_dataset = BufferedShuffleDataset(val_dataset, buffer_size=params['BATCH_SIZE'])
+        test_loader = DataLoader(
+            self.test_dataset,
+            batch_size=batch_size,
+            collate_fn=batch_tree_input,
+            num_workers=num_workers)
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
-    val_loader = DataLoader(
-        val_dataset, batch_size=params['BATCH_SIZE'], collate_fn=batch_tree_input, num_workers=params['NUM_WORKERS'])
+        
+        return train_loader, val_loader, test_loader
 
-    # set model
-    vae = Vae(device, params).to(device)
 
-    save_dir = 'checkpoints/' + f'{params["LATENT_DIM"]}latent' + f'_{params["HIDDEN_SIZE"]}hidden' + \
-        f'{"_weightedloss" if params["WEIGHTED_LOSS"] else ""}' + \
-        f'{"_indivlayers" if params["INDIV_LAYERS_VOCABS"] else ""}' + '/'
+    @ex.capture
+    def get_kl_scheduler(self, kl_scheduling, kl_warmup_iters, kl_weight, kl_ratio, kl_function, kl_cycles, batch_size, num_epochs):
+        assert kl_scheduling in ['constant', 'monotonic', 'cyclical']
 
-    os.makedirs(save_dir, exist_ok=True)
+        if kl_scheduling == 'constant':
+            return KLScheduling.ConstantAnnealing(kl_warmup_iters, kl_weight)
 
-    # Train
-    vae.fit(params['EPOCHS'], train_loader, val_loader, save_dir)
+        elif kl_scheduling == 'monotonic':
+            iterations = math.ceil((self.vocabulary.token_counts['RES']['root'] / batch_size) * num_epochs)
+            return KLScheduling.MonotonicAnnealing(iterations, kl_warmup_iters, kl_ratio, kl_function)
 
+        elif kl_scheduling == 'cyclical':
+            iterations = math.ceil((self.vocabulary.token_counts['RES']['root'] / batch_size) * num_epochs)
+            return KLScheduling.CyclicalAnnealing(iterations, kl_warmup_iters, kl_cycles, kl_ratio, kl_function)
+
+
+    @ex.capture
+    def run(self, num_epochs, save_dir, _run):
+        if save_dir is not None:
+            save_dir = os.path.join(save_dir, str(_run._id))
+            os.makedirs(save_dir, exist_ok=True)
+
+        self.model.fit(num_epochs, self.kl_scheduler, self.train_loader, self.val_loader, save_dir)
+        bleu_scores, reconstructions = self.model.test(self.test_loader)
+
+        return bleu_scores
+
+
+@ex.main
+def main(_run):
+    trainer = Trainer()
+    bleu_scores = trainer.run()
+
+    return {'bleu_scores': bleu_scores}
 
 if __name__ == "__main__":
-    tokens_paths = {
-        'RES': '../data/ast_trees_full_19-05-2021/reserved_tokens/',
-        'NAME': '../data/ast_trees_full_19-05-2021/name_tokens/',
-        'TYPE': '../data/ast_trees_full_19-05-2021/type_tokens/',
-        'LITERAL': '../data/ast_trees_full_19-05-2021/literal_tokens/',
-    }
-    dataset_path_train = '../data/ast_trees_full_19-05-2021/asts_train/'
-    dataset_path_val = '../data/ast_trees_full_19-05-2021/asts_val/'
+    ex.run_commandline()
 
-    train(dataset_path_train, dataset_path_val, tokens_paths)
+
+
+
+
+
+    # save_dir = 'checkpoints/' + f'{params["LATENT_DIM"]}latent' + f'_{params["HIDDEN_SIZE"]}hidden' + \
+    # f'{"_weightedloss" if params["WEIGHTED_LOSS"] else ""}' + \
+    # f'{"_indivlayers" if params["INDIV_LAYERS_VOCABS"] else ""}' + '/'

@@ -3,16 +3,19 @@ from datetime import datetime
 from tqdm import tqdm
 import math
 import torch
-from torch import optim
 import torch.nn as nn
 from models.TreeLstmEncoder import TreeLstmEncoder
 from models.TreeLstmDecoder import TreeLstmDecoder
 from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
 from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
 from models.TreeSeqRnnEncoder import TreeSeqRnnEncoder
+from model_utils.embeddings import EmbeddingLoader
+from model_utils.metrics_helper import MetricsHelper
+from model_utils.earlystopping import EarlyStopping
 from time import time
 from nltk.translate.bleu_score import corpus_bleu
 import utils.KLScheduling as KLScheduling
+from config.vae_config import ex
 
 
 
@@ -22,53 +25,44 @@ class Vae(nn.Module):
     Can also be used to easily save and load models
     """
 
-    def __init__(self, device, params):
+    def __init__(self, device, vocabulary, loss_weights):
         super().__init__()
 
-        self.res_vocab_size = params['RES_VOCAB_SIZE']
-        self.clip_grad_norm = params['CLIP_GRAD_NORM']
-        self.clip_grad_val = params['CLIP_GRAD_VAL']
-        self.params = params
+        self.vocabulary = vocabulary
         self.embedding_layers = nn.ModuleDict({})
 
-        # Create shared embedding layers based on vocab sizes we give
-        for k, v in params.items():
-            if 'VOCAB_SIZE' in k:
-                # For reserved tokens or if not individual layers for vocabs
-                if 'RES' in k or not params['INDIV_LAYERS_VOCABS']:
-                    embbedding_size = params['EMBEDDING_DIM']
-                # For leaf tokens
-                else:
-                    embbedding_size = params['LEAF_EMBEDDING_DIM']
+        self.create_embedding_layers()
 
-                if 'NAME' in k:
-                    vocab_size = params['TOP_NAMES_TO_KEEP'] + params['NAME_ID_VOCAB_SIZE']
-                else:
-                    vocab_size = params[k]
-
-                self.embedding_layers[k.split('_')[0]] = nn.Embedding(
-                    vocab_size + 1, embbedding_size)
-
-        # If we are using leaf tokens as well, se the complete encoder and decoder models
-        if len(self.embedding_layers) > 1:
-            self.encoder = TreeLstmEncoderComplete(device, params, self.embedding_layers)
-            self.decoder = TreeLstmDecoderComplete(device, params, self.embedding_layers)
-            # self.encoder = TreeSeqRnnEncoder(device, params, self.embedding_layers).to(device)
-        else:
-            self.vocab_size = None
-            self.embedding = None
-
-            self.encoder = TreeLstmEncoder(device, params, self.res_embedding)
-            self.decoder = TreeLstmDecoder(device, params, self.res_embedding)
-
-
-
-        self.optimizer = optim.Adam(self.parameters(), lr=params['LEARNING_RATE'])
+        self.encoder = TreeLstmEncoderComplete(device, self.embedding_layers)
+        self.decoder = TreeLstmDecoderComplete(device, self.embedding_layers, vocabulary, loss_weights)
+        # self.encoder = TreeSeqRnnEncoder(device, params, self.embedding_layers).to(device)
 
         # Store losses -> so we can easily save them
-        self.losses = {}
+        self.metrics = {}
 
         self.device = device
+
+
+    def set_optimizer(self, optimizer):
+        self.optimizer = optimizer
+
+
+    @ex.capture
+    def create_embedding_layers(self, embedding_dim, indiv_embed_layers, pretrained_emb, max_name_tokens):
+        # Create shared embedding layers based on vocab sizes we give
+
+        embedding_loader = EmbeddingLoader(embedding_dim, pretrained_emb)
+
+        if indiv_embed_layers:
+            for vocab_name in self.vocabulary.token_counts.keys():
+                max_tokens = self.vocabulary.get_vocab_size(vocab_name)
+
+                embedding_loader.load_embedding(self.vocabulary.get_cleaned_index2token(vocab_name, max_tokens))
+                self.embedding_layers[vocab_name] = embedding_loader.get_embedding_layer()
+        else:
+            embedding_loader.load_embedding(self.vocabulary.get_cleaned_index2token('ALL'))
+            self.embedding_layers['ALL'] = embedding_loader.get_embedding_layer()
+
 
     def forward(self, batch):
         z, kl_loss = self.encoder(batch)
@@ -77,7 +71,10 @@ class Vae(nn.Module):
         return kl_loss, reconstruction_loss, individual_losses, accuracies
 
 
-    def fit(self, epochs, train_loader, val_loader=None, save_dir=None):
+    @ex.capture
+    def fit(self, epochs, kl_scheduler, train_loader, val_loader, save_dir=None,
+            clip_grad_norm=0, clip_grad_val=0, save_every=1000, check_early_stop_every=500,
+            early_stop_patience=3, early_stop_min_delta=0, _run=None):
         """
         Trains the VAE model for the chosen encoder, decoder and its optimizers with the given loss function.
         @param epochs: The number of epochs to train for
@@ -86,148 +83,153 @@ class Vae(nn.Module):
         @param save_dir: The directory to save model checkpoints to, will save every epoch if save_path is given
         """
 
+        early_stopping = EarlyStopping(early_stop_patience, early_stop_min_delta)
+        current_iter_train = 0
+        current_iter_val = 0
+
+        MetricsHelper.init_model_metrics(self.metrics)
+
+
+        for _ in range(epochs):
+            # Fit one epoch of training
+            current_iter_train, current_iter_val = self._fit_epoch(train_loader, val_loader, kl_scheduler, current_iter_train,
+                                                       current_iter_val, clip_grad_norm, clip_grad_val, check_early_stop_every,
+                                                       early_stopping, save_every, save_dir, _run)
+
+            # Validate one epoch
+            current_iter_val = self._val_epoch(val_loader, current_iter_val, early_stopping, _run)
+
+
+        self.save_model(os.path.join(save_dir, 'model.tar'))
+
+        return self.metrics
+
+
+    def _fit_epoch(self, train_loader, val_loader, kl_scheduler, current_iter_train, current_iter_val,
+                   clip_grad_norm, clip_grad_val, check_early_stop_every, early_stopping,
+                   save_every, save_dir, _run):
         self.train()
 
-        iterations = math.ceil((self.params['TOKEN_VOCABS']['RES']['root'] / self.params['BATCH_SIZE']) * epochs)
+        for batch_index, batch in enumerate(train_loader):
+            current_iteration = current_iter_train + batch_index
+            kl_weight = kl_scheduler.get_weight(current_iteration)
 
-        kl_scheduler = KLScheduling.CyclicalAnnealing(iterations, nr_warmup_iterations=300)
+            for key in batch.keys():
+                if key not in ['tree_sizes', 'vocabs', 'oov_name_token2index']:
+                    batch[key] = batch[key].to(self.device)
 
-        running_losses = {}
-        loss_types_train = list(self.embedding_layers.keys()) + \
-            ['PARENT', 'SIBLING', 'IS_RES', 'KL']
+            kl_loss, reconstruction_loss, individual_losses, accuracies = self(batch)
 
-        loss_types_val = [f'VAL_{ltype}' for ltype in loss_types_train]
-        current_iteration = 0
+            loss = kl_loss * kl_weight + reconstruction_loss
 
-        for loss_type in loss_types_train + loss_types_val:
-            self.losses[loss_type] = {}
+            loss.backward()
+
+            if clip_grad_norm != 0:
+                torch.nn.utils.clip_grad_norm_(self.parameters(), clip_grad_norm)
+
+            if clip_grad_val != 0:
+                torch.nn.utils.clip_grad_value_(self.parameters(), clip_grad_val)
+
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+
+            MetricsHelper.log_to_sacred(self.training, current_iteration, loss, kl_loss, reconstruction_loss,
+                                        individual_losses, accuracies, kl_weight, batch['vocabs'], _run)
+            MetricsHelper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
+                                               individual_losses, accuracies, kl_weight, batch['vocabs'])
+
+            
+            # Save model to file every X iterations
+            if current_iteration % save_every == save_every - 1 and save_dir is not None:
+                self.save_model(os.path.join(
+                    save_dir, f'iter{current_iteration}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
+
+            # Check for early stopping every X iterations, run over validation dataset
+            if current_iteration % check_early_stop_every == check_early_stop_every - 1:
+                current_iter_val = self._val_epoch(val_loader, current_iter_val, early_stopping, _run)
+                if early_stopping.early_stop:
+                    break
+
+                # after validating, set model back to training mode
+                self.train()
+
+        return current_iter_train + batch_index, current_iter_val
 
 
-        # pbar = tqdm(unit='batch')
-        for epoch in range(epochs):
-            for loss_type in loss_types_train + loss_types_val:
-                running_losses[loss_type] = 0
+    def _val_epoch(self, val_loader, iterations_passed, early_stopping, _run):
+        self.eval()
 
-            pbar = tqdm(unit='batch')
-            # with torch.no_grad():
-            for batch_index, batch in enumerate(train_loader):
-                self.optimizer.zero_grad()
+        total_loss = 0
+
+        with torch.no_grad():
+            for batch_index, batch in enumerate(val_loader):
+                current_iteration = iterations_passed + batch_index
 
                 for key in batch.keys():
-                    if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
-                        batch[key] = batch[key].to(self.device)
+                    if key not in ['tree_sizes', 'vocabs', 'oov_name_token2index']:
+                        batch[key] = batch[key].to(self.device) 
 
-                
-                kl_loss, reconstruction_loss, individual_losses, accuracies = self(batch)
+                z, kl_loss = self.encoder(batch)
+                reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch, batch['oov_name_token2index'])
 
-                # Calculate total loss and backprop
-                loss = kl_loss * kl_scheduler.get_weight(current_iteration) + reconstruction_loss
+                loss = kl_loss + reconstruction_loss
+                total_loss += loss.item()
 
-                loss.backward()
-
-                if self.clip_grad_norm != 0:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.encoder.parameters(), self.clip_grad_norm)
-                    torch.nn.utils.clip_grad_norm_(
-                        self.decoder.parameters(), self.clip_grad_norm)
-
-                if self.clip_grad_val != 0:
-                    torch.nn.utils.clip_grad_value_(
-                        self.encoder.parameters(), self.clip_grad_val)
-                    torch.nn.utils.clip_grad_value_(
-                        self.decoder.parameters(), self.clip_grad_val)
-
-                # Update the weights
-                self.optimizer.step()
-
-                for loss_type in individual_losses.keys():
-                    running_losses[loss_type] += individual_losses[loss_type]
-
-                running_losses['KL'] += kl_loss.item()
-
-                pbar.set_postfix({
-                    'train_loss': loss.item(),
-                    'kl_loss': kl_loss.item(),
-                    'recon_loss': reconstruction_loss.item(),
-                    'kl weight': kl_scheduler.get_weight(current_iteration),
-                    'acc_parent': accuracies['PARENT'],
-                    'acc_sibling': accuracies['SIBLING'],
-                    'acc_IS_RES': accuracies['IS_RES'],
-                    'acc_RES': accuracies['RES'],
-                    'acc_NAME': accuracies['NAME'],
-                    'acc_TYPE': accuracies['TYPE'],
-                    'acc_LIT': accuracies['LITERAL']})
-                pbar.update()
-                current_iteration += 1
-
-                if batch_index % self.params['SAVE_PER_BATCHES'] == self.params['SAVE_PER_BATCHES'] - 1:
-                    for loss_type in loss_types_train:
-                        self.losses[loss_type][f'epoch{epoch}-batch{batch_index}'] = running_losses[loss_type] / self.params['SAVE_PER_BATCHES']
-                        running_losses[loss_type] = 0
-
-                    if save_dir is not None:
-                        self.save_model(os.path.join(
-                            save_dir, f'VAE_epoch{epoch}_batch{batch_index}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
-
-                # if batch_index > 9:
-                # break
+                MetricsHelper.log_to_sacred(self.training, current_iteration, loss, kl_loss, reconstruction_loss,
+                                        individual_losses, accuracies, 1, batch['vocabs'], _run)
+                MetricsHelper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
+                                                individual_losses, accuracies, 1, batch['vocabs'])
 
 
+        early_stopping(total_loss)
 
-            # if val_loader is not None:
-            #     self.encoder.eval()
-            #     self.decoder.eval()
-            #     val_steps = 0
-
-            #     for batch_index, batch in tqdm(enumerate(val_loader), unit='batch'):
-            #         with torch.no_grad():
-            #             for key in batch.keys():
-            #                 if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
-            #                     batch[key] = batch[key].to(self.device)
-
-            #             z, kl_loss = self.encoder(batch)
-            #             reconstruction_loss, individual_losses, accuracies = self.decoder(
-            #                 z, batch)
-
-            #             for loss_type in individual_losses.keys():
-            #                 running_losses[f'VAL_{loss_type}'] += individual_losses[loss_type]
-
-            #             running_losses['VAL_KL'] += kl_loss.item()
-            #             val_steps += 1
-
-            #     for loss_type in loss_types_val:
-            #         self.losses[loss_type][f'epoch{epoch}'] = running_losses[loss_type] / val_steps
-            #         running_losses[loss_type] = 0
-
-            if save_dir is not None:
-                self.save_model(os.path.join(
-                    save_dir, f'VAE_epoch{epoch}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
-
-        return self.losses
+        return iterations_passed + batch_index
 
 
-    def evaluate(self, batch, idx_to_label):
+    def test(self, test_loader):
+        self.eval()
+        bleu_scores = {'bleu_1': 0, 'bleu_2': 0, 'bleu_3': 0, 'bleu_4': 0}
+        iterations = 0
+
+        with torch.no_grad():
+            for batch in test_loader:
+                iterations += 1
+                reconstructions = self.evaluate(batch)
+                new_blue_scores = self.calculate_eval_scores(reconstructions, batch)
+
+                # Add bleu scores to our dictionary
+                for key, score in new_blue_scores.items():
+                    bleu_scores[key] += score
+
+                if iterations > 10:
+                    break
+
+        # Get the average of the bleu scores over the entire test dataset
+        for key in bleu_scores.keys():
+            bleu_scores[key] /= iterations
+
+        return bleu_scores, reconstructions
+
+
+    def evaluate(self, batch):
         """
         Evaluates the VAE model: given data, reconstruct the input and output this
         @param data_loader: Torch Dataset that generates batches to evaluate on
         """
 
-        self.eval()
-
         reconstructions = []
 
-        with torch.no_grad():
-            for key in batch.keys():
-                if key not in ['tree_sizes', 'vocabs', 'nameid_to_placeholderid']:
-                    batch[key] = batch[key].to(self.device)
+        for key in batch.keys():
+            if key not in ['tree_sizes', 'vocabs', 'oov_name_token2index']:
+                batch[key] = batch[key].to(self.device)
 
-            z, _ = self.encoder(batch)
-            reconstructions += self.decoder(z, target=None, idx_to_label=idx_to_label,
-                                            nameid_to_placeholderid=batch['nameid_to_placeholderid'])
+        z, _ = self.encoder(batch)
+        reconstructions += self.decoder(z, target=None, oov_name_token2index=batch['oov_name_token2index'])
 
         return reconstructions
 
-    def generate(self, z, idx_to_label):
+
+    def generate(self, z):
         """
         Generate using the VAE model: given latent vector(s) z, generate output
         @param z: latent vector(s) -> (batch_size, latent_size)
@@ -236,12 +238,12 @@ class Vae(nn.Module):
         self.eval()
 
         with torch.no_grad():
-            output = self.decoder(z, target=None, idx_to_label=idx_to_label)
+            output = self.decoder(z, target=None)
 
         return output
 
 
-    def calculate_eval_scores(self, trees, data, idx_to_label):
+    def calculate_eval_scores(self, trees, data):
         """
         Calculate evaluation scores for generated trees (e.g. BLEU scores)
 
@@ -253,7 +255,7 @@ class Vae(nn.Module):
         scores = {}
 
         # Get correct formats
-        pred_features = [[self.retrieve_features_tree_dfs(tree, idx_to_label, data['nameid_to_placeholderid'][index])] for index, tree in enumerate(trees)]
+        pred_features = [[self.retrieve_features_tree_dfs(tree, data['oov_name_token2index'][index])] for index, tree in enumerate(trees)]
         true_features = [f.view(-1).tolist() for f in torch.split(data['features'], data['tree_sizes'])]
 
         # Compute blue scores
@@ -265,7 +267,7 @@ class Vae(nn.Module):
         return scores
 
 
-    def retrieve_features_tree_dfs(self, node, idx_to_label, nameid_to_placeholderid):
+    def retrieve_features_tree_dfs(self, node, oov_name_token2index):
         """
         Traverse Tree Depth first and put the features in a list. 
         Here the name tokens are transformed to the placeholder IDs.
@@ -277,13 +279,16 @@ class Vae(nn.Module):
         """
 
         # If the node is a name node, get placeholder ID, otherwise simply append the token
-        if not node.res and 'LITERAL' not in idx_to_label['RES'][node.parent.token] and 'TYPE' != idx_to_label['RES'][node.parent.token] and node.token in nameid_to_placeholderid:
-            features = [nameid_to_placeholderid[node.token]]
-        else:
+        try:
+            if not node.res and 'LITERAL' not in self.vocabulary.index2token['RES'][node.parent.token] and 'TYPE' != self.vocabulary.index2token['RES'][node.parent.token] and node.token in oov_name_token2index:
+                features = [oov_name_token2index[node.token]]
+            else:
+                features = [node.token]
+        except KeyError:
             features = [node.token]
             
         for child in node.children:
-            features.extend(self.retrieve_features_tree_dfs(child, idx_to_label, nameid_to_placeholderid))
+            features.extend(self.retrieve_features_tree_dfs(child, oov_name_token2index))
                 
         return features
 
@@ -297,11 +302,9 @@ class Vae(nn.Module):
         os.makedirs('/'.join(path.split('/')[:-1]), exist_ok=True)
 
         torch.save({
-            'encoder_state_dict': self.encoder.state_dict(),
-            'decoder_state_dict': self.decoder.state_dict(),
-            'encoder_optimizer_state_dict': self.encoder_optimizer.state_dict(),
-            'decoder_optimizer_state_dict': self.decoder_optimizer.state_dict(),
-            'losses': self.losses
+            'state_dict': self.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'metrics': self.metrics
         }, path)
 
 
@@ -314,10 +317,21 @@ class Vae(nn.Module):
 
         checkpoint = torch.load(path)
 
-        self.load_state_dict(checkpoint['state_dict'])
-        # self.decoder.load_state_dict(checkpoint['decoder_state_dict'])
-        self.optimizer.load_state_dict(
-            checkpoint['optimizer_state_dict'])
-        # self.decoder_optimizer.load_state_dict(
-        #     checkpoint['decoder_optimizer_state_dict'])
-        self.losses = checkpoint['losses']
+        try:
+            self.load_state_dict(checkpoint['state_dict'])
+        except RuntimeError as e:
+            print(f'INFO - {e}')
+            print('INFO - skipping missing key(s), loading the rest of the model weights')
+            self.load_state_dict(checkpoint['state_dict'], strict=False)
+
+        try:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        except AttributeError as e:
+            print(f'INFO - skipped loading optimizer state dict: \n {e}')
+        except ValueError as e:
+            print(f'INFO - skipped loading optimizer state dict: \n {e}')
+
+        try:
+            self.metrics = checkpoint['metrics']
+        except KeyError:
+            print('INFO - skip loading metrics, not available in pretrained model')

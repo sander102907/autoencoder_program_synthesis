@@ -2,43 +2,52 @@ import torch
 import torch.nn as nn
 from models.tree_lstm import TreeLSTM
 from model_utils.modules import LstmAttention
+from config.vae_config import ex
+
 
 class TreeLstmEncoderComplete(nn.Module):
-    def __init__(self, device, params, embedding_layers):
+    @ex.capture
+    def __init__(self, 
+                device, 
+                embedding_layers, 
+                embedding_dim, 
+                rnn_hidden_size, 
+                latent_dim, 
+                use_cell_output_lstm, 
+                vae,
+                num_rnn_layers_enc,
+                indiv_embed_layers):
+
         super().__init__() 
         
         self.device = device
-        self.params = params
-        self.hidden_size = params['HIDDEN_SIZE']
+        self.embedding_dim = embedding_dim
+        self.rnn_hidden_size = rnn_hidden_size
+        self.vae = vae
+        self.num_rnn_layers_enc = num_rnn_layers_enc
+        self.indiv_embed_layers = indiv_embed_layers
+        self.use_cell_output_lstm = use_cell_output_lstm
+        
+
         self.embedding_layers = embedding_layers
         self.tree_lstms = nn.ModuleList([])
         self.leaf_lstms = nn.ModuleDict({})
-        self.vae = self.params['VAE']
-        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.attention = LstmAttention(rnn_hidden_size)
 
-        self.attention = LstmAttention(self.hidden_size)
-
-        for i in range(self.params['NUM_LSTM_LAYERS']):
+        for i in range(num_rnn_layers_enc):
             if i == 0:
-                self.tree_lstms.append(TreeLSTM(params['EMBEDDING_DIM'], params['HIDDEN_SIZE']))
+                self.tree_lstms.append(TreeLSTM(embedding_dim, rnn_hidden_size))
             else:
-                self.tree_lstms.append(TreeLSTM(params['HIDDEN_SIZE'], params['HIDDEN_SIZE']))
-
-        if params['INDIV_LAYERS_VOCABS']:
-            for k, embedding_layer in embedding_layers.items():
-                if not 'RES' in k:
-                    self.leaf_lstms[k] = nn.LSTMCell(params['LEAF_EMBEDDING_DIM'], params['HIDDEN_SIZE'])
+                self.tree_lstms.append(TreeLSTM(rnn_hidden_size, rnn_hidden_size))
 
 
-        if params['USE_CELL_LSTM_OUTPUT']:
-            hidden_size = params['HIDDEN_SIZE'] * 2
-            latent_dim = params['LATENT_DIM'] * 2
-        else:
-            hidden_size = params['HIDDEN_SIZE']
-            latent_dim = params['LATENT_DIM']
+        if use_cell_output_lstm:
+            rnn_hidden_size = rnn_hidden_size * 2
+            latent_dim = latent_dim * 2
 
-        self.z_mean = nn.Linear(hidden_size, latent_dim)
-        self.z_log_var = nn.Linear(hidden_size, latent_dim)
+        self.z_mean = nn.Linear(rnn_hidden_size, latent_dim)
+        self.z_log_var = nn.Linear(rnn_hidden_size, latent_dim)
+
         
     def forward(self, inp):
         batch_size = len(inp['tree_sizes'])
@@ -48,57 +57,48 @@ class TreeLstmEncoderComplete(nn.Module):
         vocabs = inp['vocabs']
         total_nodes = node_order.shape[0]
 
-        features = torch.zeros(total_nodes, self.params['EMBEDDING_DIM'], device=self.device)
+        features = torch.zeros(total_nodes, self.embedding_dim, device=self.device)
         h = []
         c = []
 
-        for _ in range(self.params['NUM_LSTM_LAYERS']):
-            h.append(torch.zeros(total_nodes, self.hidden_size, device=self.device))
-            c.append(torch.zeros(total_nodes, self.hidden_size, device=self.device))
-        
-        for k, embedding_layer in self.embedding_layers.items():
-            if self.params['INDIV_LAYERS_VOCABS']:
-                if 'RES' in k:
-                    features_vocab = embedding_layer(inp['features'][vocabs == k].long()).view(-1, self.params['EMBEDDING_DIM'])
-                    features[vocabs == k] = features_vocab
+        for _ in range(self.num_rnn_layers_enc):
+            h.append(torch.zeros(total_nodes, self.rnn_hidden_size, device=self.device))
+            c.append(torch.zeros(total_nodes, self.rnn_hidden_size, device=self.device))
 
-                else:
-                    features_vocab = embedding_layer(inp['features'][vocabs == k].long()).view(-1, self.params['LEAF_EMBEDDING_DIM'])
-                    h_vocab, c_vocab = self.leaf_lstms[k](features_vocab)
-                    h[vocabs == k] = h_vocab
-                    c[vocabs == k] = c_vocab
-            else:
-                features_vocab = embedding_layer(inp['features'][vocabs == k].long()).view(-1, self.params['EMBEDDING_DIM'])
+        
+        if self.indiv_embed_layers:
+            for k, embedding_layer in self.embedding_layers.items():
+                features_vocab = embedding_layer(inp['features'][vocabs == k].long()).view(-1, self.embedding_dim)
                 features[vocabs == k] = features_vocab
 
-        # Tree LSTM can start from bottom nodes (iteration 0) if 1 LSTM is used, if individual leaf LSTMS are used, start at iteration 1
-        start_iteration = 1 if self.params['INDIV_LAYERS_VOCABS'] else 0
+        else:
+            features_vocab = self.embedding_layers['ALL'](inp['features_combined'].long()).view(-1, self.embedding_dim)
+            features = features_vocab
 
-        for i in range(self.params['NUM_LSTM_LAYERS']):
+        for i in range(self.num_rnn_layers_enc):
             hidden, cell = self.tree_lstms[i](features,
                                         node_order,
                                         adj_list,
                                         edge_order,
                                         h[i],
-                                        c[i],
-                                        start_iteration)
+                                        c[i])
 
             features = hidden
         
         
         # hidden roots: (batch_size, hidden_size (*2 if using cell state of LSTM output))
         hidden_roots = torch.zeros(batch_size,
-                                   self.hidden_size *2 if self.params['USE_CELL_LSTM_OUTPUT'] else self.hidden_size,
+                                   self.rnn_hidden_size *2 if self.use_cell_output_lstm else self.rnn_hidden_size,
                                    device=self.device)
 
-        # hidden = self.attention(hidden)
+        hidden = self.attention(hidden)
 
         
         # Offset to check in hidden state, start at zero, increase by tree size each time
         # Example: hidden  [1, 3, 5, 1, 5, 2] and tree_sizes = [4, 2] we want hidden[0] and hidden[4] -> 1, 5
         # offset = 0
         # for i in range(len(inp['tree_sizes'])):
-        #     if self.params['USE_CELL_LSTM_OUTPUT']:
+        #     if self.use_cell_output_lstm:
         #         hidden_roots[i] = torch.cat([hidden[offset], cell[offset]])
         #     else:
         #         hidden_roots[i] = hidden[offset]
@@ -117,10 +117,9 @@ class TreeLstmEncoderComplete(nn.Module):
         # Parameterization trick
         z = self.reparameterize(z_mean, z_log_var)
 
+
         if self.vae:
             kl_loss = (0.5 * torch.sum(z_log_var.exp() - z_log_var - 1 + z_mean.pow(2)))
-            # Make sure KL divergence is scaled the same as the reconstruction loss
-            # kl_loss /= total_nodes
         else:
             kl_loss = torch.tensor([0], device=self.device)        
         

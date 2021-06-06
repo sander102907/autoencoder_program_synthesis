@@ -13,9 +13,9 @@ import math
 class AstDataset(IterableDataset):
     "AST trees dataset"
 
-    def __init__(self, data_path, label_to_idx, max_tree_size=-1, nr_of_names_to_keep=300, remove_non_res=False, get_statistics_only=False):
+    def __init__(self, data_path, vocabulary, max_tree_size=-1, nr_of_names_to_keep=300, remove_non_res=False, get_statistics_only=False):
         self.max_tree_size = max_tree_size
-        self.label_to_idx = label_to_idx
+        self.vocabulary = vocabulary
         self.remove_non_res = remove_non_res
         self.get_statistics_only = get_statistics_only
         self.nr_of_names_to_keep = nr_of_names_to_keep
@@ -98,9 +98,7 @@ class AstDataset(IterableDataset):
 
     def preprocess(self, ast):
         # load the JSON of the tree
-        
         tree = json.loads(ast[1])
-        # print(ast[0], ast[1])
 
         # Get the amount of nodes
         nodes = self.get_amt_nodes(tree)
@@ -126,10 +124,6 @@ class AstDataset(IterableDataset):
         if 'children' in root:
             to_remove = []
             for child in root['children']:
-                # if child['res'] and not 'children' in child:
-                #     if child['token'] == 'ARGUMENTS':
-                    # if root['token'] not in ['ACCESS_SPECIFIER', 'ARGUMENTS', 'CALL_EXPR', 'COMPOUND_STMT', 'DECLARATOR', 'DECL_REF_EXPR', 'FOR_STMT', 'FUNCTION_DECL', 'IF_STMT', 'WHILE_STMT']:
-                        # print(f"'{root['token']}',", child['token'], ast[0]) #ast[0], ast[1])
                 if not child['res'] and 'children' in child and not self.remove_non_res:
                     to_remove.append(child)
                 if child['res'] or not self.remove_non_res:
@@ -156,52 +150,72 @@ class AstDataset(IterableDataset):
                 n = self._label_node_index(child, n)
         return n
 
-    def _gather_node_attributes(self, node, key, parent=None, nameid_to_placeholderid=None):
-        if nameid_to_placeholderid is None:
-            nameid_to_placeholderid = {}
+    def _gather_node_attributes(self, node, key, parent=None, oov_name_token2index=None):
+        if oov_name_token2index is None:
+            oov_name_token2index = {}
 
-        if self.label_to_idx is not None:
+        if self.vocabulary.token2index is not None:
             if node['res']:
-                feature = self.label_to_idx['RES'][node[key]]
+                feature = self.vocabulary.token2index['RES'][node[key]]
                 vocab = 'RES'
             else:
-                if 'LITERAL' in self.label_to_idx.keys() and 'LITERAL' in parent['token']:
-                    feature = self.label_to_idx['LITERAL'][node[key]]
+                if 'LITERAL' in self.vocabulary.token2index.keys() and 'LITERAL' in parent['token']:
+                    feature = self.vocabulary.token2index['LITERAL'][node[key]]
                     vocab = 'LITERAL'
-                elif 'TYPE' in self.label_to_idx.keys() and 'TYPE' == parent['token']:
-                    feature = self.label_to_idx['TYPE'][node[key]]
+                elif 'TYPE' in self.vocabulary.token2index.keys() and 'TYPE' == parent['token']:
+                    feature = self.vocabulary.token2index['TYPE'][node[key]]
                     vocab = 'TYPE'
-                elif 'NAME' in self.label_to_idx.keys():
-                    name_id = self.label_to_idx['NAME'][node[key]]
-                    if name_id < self.nr_of_names_to_keep:
-                        feature = name_id
+                elif 'NAME' in self.vocabulary.token2index.keys():
+                    token = node[key]
+
+                    if token in list(self.vocabulary.token2index['NAME'].keys())[:self.nr_of_names_to_keep]:
+                        feature = self.vocabulary.token2index['NAME'][token]
+
+                    elif token in oov_name_token2index:
+                        feature = oov_name_token2index[token]
+
+                    else:
+                        feature = len(oov_name_token2index) + self.nr_of_names_to_keep + self.vocabulary.offsets['NAME']
+                        oov_name_token2index[token] = feature
+
+                    # name_id = self.vocabulary.token2index['NAME'][node[key]]
+                    # if name_id < self.nr_of_names_to_keep:
+                    #     feature = name_id
 
                     # Map the name token to an ID -> if already mapped, get the ID, if not: add to mapping
-                    elif name_id in nameid_to_placeholderid:
-                        feature = nameid_to_placeholderid[name_id]
-                    else:
-                        feature = len(nameid_to_placeholderid) + self.nr_of_names_to_keep
-                        nameid_to_placeholderid[name_id] = feature
+                    # elif name_id in nameid_to_placeholderid:
+                    #     feature = nameid_to_placeholderid[name_id]
+                    # else:
+                    #     feature = len(nameid_to_placeholderid) + self.nr_of_names_to_keep
+                    #     nameid_to_placeholderid[name_id] = feature
 
                     vocab = 'NAME'
 
                 else:
-                    feature = self.label_to_idx['NON_RES'][node[key]]
+                    feature = self.vocabulary.token2index['NON_RES'][node[key]]
                     vocab = 'NON_RES'
+
+
+            if vocab == 'NAME' and token in oov_name_token2index:
+                feature_combined = feature
+            else:
+                feature_combined = self.vocabulary.token2index['ALL'][node[key]]
         else:
             feature = node[key]
             vocab = ''
 
         features = [[torch.tensor([feature])]]
+        features_combined = [[torch.tensor([feature_combined])]]
         vocabs = [vocab]
         if 'children' in node:
             for child in node['children']:
-                feature, vocab, nameid_to_placeholderid = self._gather_node_attributes(
-                    child, key, node, nameid_to_placeholderid)
+                feature, feature_combined, vocab, oov_name_token2index = self._gather_node_attributes(
+                    child, key, node, oov_name_token2index)
                 features.extend(feature)
+                features_combined.extend(feature_combined)
                 vocabs += vocab
 
-        return features, vocabs, nameid_to_placeholderid
+        return features, features_combined, vocabs, oov_name_token2index
 
     def _gather_adjacency_list(self, node):
         adjacency_list = []
@@ -212,29 +226,45 @@ class AstDataset(IterableDataset):
 
         return adjacency_list
 
+    def _gather_adjacency_list_sib(self, node):
+        adjacency_list = []
+        if 'children' in node:
+            for child_idx in range(len(node['children'])):
+                if child_idx > 0:
+                    adjacency_list.append([node['children'][child_idx - 1]['index'], node['children'][child_idx]['index']])
+                else:
+                    adjacency_list.append([0, node['children'][child_idx]['index']])
+                adjacency_list.extend(self._gather_adjacency_list_sib(node['children'][child_idx]))
+
+        return adjacency_list
+
     def convert_tree_to_tensors(self, tree):
         # Label each node with its walk order to match nodes to feature tensor indexes
         # This modifies the original tree as a side effect
         self._label_node_index(tree)
 
-        features, vocabs, nameid_to_placeholderid = self._gather_node_attributes(
+        features, features_combined, vocabs, oov_name_token2index = self._gather_node_attributes(
             tree, 'token')
         adjacency_list = self._gather_adjacency_list(tree)
+        adjacency_list_sib = self._gather_adjacency_list_sib(tree)
 
         node_order_bottomup, edge_order_bottomup = calculate_evaluation_orders(
             adjacency_list, len(features))
-        node_order_topdown, edge_order_topdown = calculate_evaluation_orders_topdown(
-            adjacency_list, len(features))
+        node_order_topdown, edge_order_topdown, edge_order_topdown_sib = calculate_evaluation_orders_topdown(
+            adjacency_list, adjacency_list_sib, len(features))
 
         return {
             'features': torch.tensor(features, dtype=torch.int32),
+            'features_combined': torch.tensor(features_combined, dtype=torch.int32),
             'node_order_bottomup': torch.tensor(node_order_bottomup, dtype=torch.int32),
             'node_order_topdown': torch.tensor(node_order_topdown, dtype=torch.int32),
             'adjacency_list': torch.tensor(adjacency_list, dtype=torch.int64),
+            'adjacency_list_sib': torch.tensor(adjacency_list_sib, dtype=torch.int64),
             'edge_order_bottomup': torch.tensor(edge_order_bottomup, dtype=torch.int32),
             'edge_order_topdown': torch.tensor(edge_order_topdown, dtype=torch.int32),
+            'edge_order_topdown_sib': torch.tensor(edge_order_topdown_sib, dtype=torch.int32),
             'vocabs': vocabs,
-            'nameid_to_placeholderid': nameid_to_placeholderid
+            'oov_name_token2index': oov_name_token2index
         }
 
 
