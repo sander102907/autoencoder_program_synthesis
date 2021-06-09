@@ -2,12 +2,12 @@ from sacred import Experiment
 from sacred.observers import MongoObserver
 
 EXPERIMENT_NAME = 'Experiment'
-YOUR_CPU = None
 DATABASE_NAME = 'Autoencoder_program_synthesis'
+URL = f'mongodb+srv://sander:9AqrPVfuPJuv0ajP@cluster0.b2wvr.mongodb.net/{DATABASE_NAME}?retryWrites=true&w=majority'
 
 ex = Experiment('Experiment')
 
-ex.observers.append(MongoObserver.create(url=YOUR_CPU, db_name=DATABASE_NAME))
+ex.observers.append(MongoObserver.create(url=URL, db_name=DATABASE_NAME))
 
 @ex.config
 def get_config():
@@ -91,6 +91,9 @@ def get_config():
 """ 
 To start sacredboard:
 sacredboard -m Autoencoder_program_synthesis
+
+from mongodb atlas hosted database:
+sacredboard -mu mongodb+srv://sander:9AqrPVfuPJuv0ajP@cluster0.b2wvr.mongodb.net/ Autoencoder_program_synthesis
 
 To start training a model with custom config:
 python3 train.py with "num_epochs=5"
