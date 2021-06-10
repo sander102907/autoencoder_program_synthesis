@@ -55,7 +55,8 @@ class Trainer:
 
     @ex.capture
     def load_model(self, pretrained_model):
-        self.model.load_model(pretrained_model)
+        if pretrained_model is not None and os.path.isfile(pretrained_model):
+            self.model.load_model(pretrained_model)
 
 
     @ex.capture
