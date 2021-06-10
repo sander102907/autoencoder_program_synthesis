@@ -2,6 +2,7 @@ from models.Vae import Vae
 from utils.TreeLstmUtils import batch_tree_input
 from datasets.AstDataset import AstDataset
 import utils.KLScheduling as KLScheduling
+from utils.ModelResults import ModelResults
 import os
 import json
 import csv
@@ -155,8 +156,11 @@ class Trainer:
 def main(_run):
     trainer = Trainer()
     bleu_scores = trainer.run()
+    
+    results = ModelResults()
+    results.from_dict(bleu_scores)
 
-    return {'bleu_scores': bleu_scores}
+    return {'results': results}
 
 if __name__ == "__main__":
     ex.run_commandline()
