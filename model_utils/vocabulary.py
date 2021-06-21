@@ -7,7 +7,7 @@ class Vocabulary:
         self.token_counts = {}
         self.token2index = {}
         self.index2token = {}
-        self.offsets = {}
+        # self.offsets = {}
 
         self.max_tokens = max_tokens
 
@@ -22,14 +22,14 @@ class Vocabulary:
     def load_token_counts(self, path, name):
         self.token_counts[name] = {}
         
-        self.offsets[name] = 0
+        # self.offsets[name] = 0
 
         # add offsets for token vocabs to be able to create a combined vocab
-        for k in self.token_counts.keys():
-            if self.max_tokens[k] is not None:
-                self.offsets[name] += min(len(self.token_counts[k]), self.max_tokens[k])
-            else:
-                self.offsets[name] += len(self.token_counts[k])
+        # for k in self.token_counts.keys():
+        #     if self.max_tokens[k] is not None:
+        #         self.offsets[name] += min(len(self.token_counts[k]), self.max_tokens[k])
+        #     else:
+        #         self.offsets[name] += len(self.token_counts[k])
 
         # If path is a file
         if os.path.isfile(path):
@@ -76,9 +76,15 @@ class Vocabulary:
         self.token2index['ALL'] = {}
         self.index2token['ALL'] = {}
 
-        for name, offset in self.offsets.items():
-            for token, index in self.token2index[name].items():
-                self.token2index['ALL'][token] = index + offset
+        for vocab in self.token2index.keys():
+            if vocab != 'ALL':
+                for token in self.token2index[vocab].keys():
+                    if token not in self.token2index['ALL']:
+                        self.token2index['ALL'][token] = len(self.token2index['ALL'])
+
+        # for name, offset in self.offsets.items():
+        #     for token, index in self.token2index[name].items():
+        #         self.token2index['ALL'][token] = index + offset
                 
                 
         self.index2token['ALL'] = {v: k for k, v in self.token2index['ALL'].items()}
@@ -86,6 +92,15 @@ class Vocabulary:
     def get_vocab_size(self, name):
         return len(self.token2index[name])
 
+
+    def add_new_token(self, name, token):
+        index = len(self.token2index[name])
+        self.token2index[name][token] = index
+        self.index2token[name][index] = token
+
+        index_all = len(self.token2index['ALL'])
+        self.token2index['ALL'][token] = index_all
+        self.index2token['ALL'][index_all] = token
 
     def get_tokens(self, name):
         return list(self.token_counts[name].keys())

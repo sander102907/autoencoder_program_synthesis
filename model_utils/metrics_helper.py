@@ -18,6 +18,7 @@ class MetricsHelper:
         _run.log_scalar(f'Reserved label loss {loss_type}', individual_losses['RES'], current_iteration)
         _run.log_scalar(f'Type label loss {loss_type}', individual_losses['TYPE'], current_iteration)
         _run.log_scalar(f'Literal label loss {loss_type}', individual_losses['LITERAL'], current_iteration)
+        _run.log_scalar(f'Name builtin label loss {loss_type}', individual_losses['NAME_BUILTIN'], current_iteration)
         _run.log_scalar(f'Name label loss {loss_type}', individual_losses['NAME'], current_iteration)
 
         _run.log_scalar(f'Total loss / node {loss_type}', total_loss.item() / len(vocabs), current_iteration)
@@ -29,6 +30,7 @@ class MetricsHelper:
         _run.log_scalar(f'Reserved label loss  / node {loss_type}', individual_losses['RES'] / sum(vocabs == 'RES'), current_iteration)
         _run.log_scalar(f'Type label loss  / node {loss_type}', individual_losses['TYPE']  / sum(vocabs == 'TYPE'), current_iteration)
         _run.log_scalar(f'Literal label loss  / node {loss_type}', individual_losses['LITERAL']  / sum(vocabs == 'LITERAL'), current_iteration)
+        _run.log_scalar(f'Name builtin label loss  / node {loss_type}', individual_losses['NAME_BUILTIN']  / sum(vocabs == 'NAME_BUILTIN'), current_iteration)
         _run.log_scalar(f'Name label loss  / node {loss_type}', individual_losses['NAME']  / sum(vocabs == 'NAME'), current_iteration)
 
         _run.log_scalar(f'Parent accuracy {loss_type}', accuracies['PARENT'], current_iteration)
@@ -37,6 +39,7 @@ class MetricsHelper:
         _run.log_scalar(f'Reserved label accuracy {loss_type}', accuracies['RES'], current_iteration)
         _run.log_scalar(f'Type label accuracy {loss_type}', accuracies['TYPE'], current_iteration)
         _run.log_scalar(f'Literal label accuracy {loss_type}', accuracies['LITERAL'], current_iteration)
+        _run.log_scalar(f'Name builtin label accuracy {loss_type}', accuracies['NAME_BUILTIN'], current_iteration) 
         _run.log_scalar(f'Name label accuracy {loss_type}', accuracies['NAME'], current_iteration)  
 
 
@@ -59,6 +62,7 @@ class MetricsHelper:
         model_metrics[f'Reserved label loss {loss_type}'][current_iteration] = individual_losses['RES']
         model_metrics[f'Type label loss {loss_type}'][current_iteration] = individual_losses['TYPE']
         model_metrics[f'Literal label loss {loss_type}'][current_iteration] = individual_losses['LITERAL']
+        model_metrics[f'Name builtin label loss {loss_type}'][current_iteration] = individual_losses['NAME_BUILTIN']
         model_metrics[f'Name label loss {loss_type}'][current_iteration] = individual_losses['NAME']
 
         model_metrics[f'Total loss / node {loss_type}'][current_iteration] = total_loss.item() / len(vocabs)
@@ -70,6 +74,7 @@ class MetricsHelper:
         model_metrics[f'Reserved label loss  / node {loss_type}'][current_iteration] = individual_losses['RES'] / sum(vocabs == 'RES')
         model_metrics[f'Type label loss  / node {loss_type}'][current_iteration] = individual_losses['TYPE']  / sum(vocabs == 'TYPE')
         model_metrics[f'Literal label loss  / node {loss_type}'][current_iteration] = individual_losses['LITERAL']  / sum(vocabs == 'LITERAL')
+        model_metrics[f'Name builtin label loss  / node {loss_type}'][current_iteration] = individual_losses['NAME_BUILTIN']  / sum(vocabs == 'NAME_BUILTIN')
         model_metrics[f'Name label loss  / node {loss_type}'][current_iteration] = individual_losses['NAME']  / sum(vocabs == 'NAME')
 
         model_metrics[f'Parent accuracy {loss_type}'][current_iteration] = accuracies['PARENT']
@@ -78,6 +83,7 @@ class MetricsHelper:
         model_metrics[f'Reserved label accuracy {loss_type}'][current_iteration] = accuracies['RES']
         model_metrics[f'Type label accuracy {loss_type}'][current_iteration] = accuracies['TYPE']
         model_metrics[f'Literal label accuracy {loss_type}'][current_iteration] = accuracies['LITERAL']
+        model_metrics[f'Name builtin label accuracy {loss_type}'][current_iteration] = accuracies['NAME_BUILTIN']
         model_metrics[f'Name label accuracy {loss_type}'][current_iteration] = accuracies['NAME']
 
     
@@ -94,6 +100,7 @@ class MetricsHelper:
             model_metrics[f'Reserved label loss {loss_type}'] = {}
             model_metrics[f'Type label loss {loss_type}'] = {}
             model_metrics[f'Literal label loss {loss_type}'] = {}
+            model_metrics[f'Name builtin label loss {loss_type}'] = {}
             model_metrics[f'Name label loss {loss_type}'] = {}
 
             model_metrics[f'Total loss / node {loss_type}'] = {}
@@ -105,6 +112,7 @@ class MetricsHelper:
             model_metrics[f'Reserved label loss  / node {loss_type}'] = {}
             model_metrics[f'Type label loss  / node {loss_type}'] = {}
             model_metrics[f'Literal label loss  / node {loss_type}'] = {}
+            model_metrics[f'Name builtin label loss  / node {loss_type}'] = {}
             model_metrics[f'Name label loss  / node {loss_type}'] = {}
 
             model_metrics[f'Parent accuracy {loss_type}'] = {}
@@ -113,4 +121,5 @@ class MetricsHelper:
             model_metrics[f'Reserved label accuracy {loss_type}'] = {}
             model_metrics[f'Type label accuracy {loss_type}'] = {}
             model_metrics[f'Literal label accuracy {loss_type}'] = {}
+            model_metrics[f'Name builtin label accuracy {loss_type}'] = {}
             model_metrics[f'Name label accuracy {loss_type}'] = {}

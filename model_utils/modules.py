@@ -110,11 +110,12 @@ class MultiLayerLSTMCell(nn.Module):
                     the first LSTM cell and computing the final results. Default: 1
     """
 
-    def __init__(self, input_size, hidden_size, num_layers = 1):
+    def __init__(self, input_size, hidden_size, num_layers = 1, recurrent_dropout=0):
         super().__init__()
 
         self.num_layers = num_layers
         self.rnns = nn.ModuleList([])
+        self.dropout = nn.Dropout(recurrent_dropout)
 
         # Initialize RNNs with num layers
         for i in range(num_layers):
@@ -129,11 +130,16 @@ class MultiLayerLSTMCell(nn.Module):
 
         for i in range(self.num_layers):
             if i == 0:
-                rnn_state = self.rnns[i](input, hidden_states[i])
+                h, c = self.rnns[i](input, hidden_states[i])
             else:
-                rnn_state = self.rnns[i](rnn_state[0], hidden_states[i])
+                h, c = self.rnns[i](h, hidden_states[i])
 
-            new_hidden_states.append(rnn_state)
+            # apply recurrent dropout on the outputs of each LSTM cell hidden except the last layer
+            if i < self.num_layers - 1:
+                h = self.dropout(h)
+
+
+            new_hidden_states.append((h, c))
 
         return new_hidden_states
 

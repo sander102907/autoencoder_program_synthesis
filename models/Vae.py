@@ -1,23 +1,17 @@
 import os
-from datetime import datetime
-from tqdm import tqdm
-import math
 import torch
 import torch.nn as nn
-from models.TreeLstmEncoder import TreeLstmEncoder
-from models.TreeLstmDecoder import TreeLstmDecoder
 from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
 from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
 from models.TreeSeqRnnEncoder import TreeSeqRnnEncoder
 from model_utils.embeddings import EmbeddingLoader
 from model_utils.metrics_helper import MetricsHelper
 from model_utils.earlystopping import EarlyStopping
-from time import time
 from nltk.translate.bleu_score import corpus_bleu
-import utils.KLScheduling as KLScheduling
+from utils.TreeNode import Node
+from utils.evaluation import Evaluator
 from config.vae_config import ex
-
-
+    
 
 class Vae(nn.Module):
     """
@@ -48,10 +42,14 @@ class Vae(nn.Module):
 
 
     @ex.capture
-    def create_embedding_layers(self, embedding_dim, indiv_embed_layers, pretrained_emb, max_name_tokens):
+    def create_embedding_layers(self, embedding_dim, indiv_embed_layers, pretrained_emb, pretrained_model):
         # Create shared embedding layers based on vocab sizes we give
 
-        embedding_loader = EmbeddingLoader(embedding_dim, pretrained_emb)
+        # If we are loading a pretrained model, then we do not need to load pretrained embedding
+        if pretrained_model is not None and os.path.isfile(pretrained_model):
+            embedding_loader = EmbeddingLoader(embedding_dim)
+        else:
+            embedding_loader = EmbeddingLoader(embedding_dim, pretrained_emb)
 
         if indiv_embed_layers:
             for vocab_name in self.vocabulary.token_counts.keys():
@@ -83,6 +81,8 @@ class Vae(nn.Module):
         @param save_dir: The directory to save model checkpoints to, will save every epoch if save_path is given
         """
 
+        print('INFO - Start training..')
+
         early_stopping = EarlyStopping(early_stop_patience, early_stop_min_delta)
         current_iter_train = 0
         current_iter_val = 0
@@ -90,7 +90,8 @@ class Vae(nn.Module):
         MetricsHelper.init_model_metrics(self.metrics)
 
 
-        for _ in range(epochs):
+        for epoch in range(epochs):
+            print('INFO - Starting on epoch: ', epoch)
             # Fit one epoch of training
             current_iter_train, current_iter_val = self._fit_epoch(train_loader, val_loader, kl_scheduler, current_iter_train,
                                                        current_iter_val, clip_grad_norm, clip_grad_val, check_early_stop_every,
@@ -98,6 +99,9 @@ class Vae(nn.Module):
 
             # Validate one epoch
             current_iter_val = self._val_epoch(val_loader, current_iter_val, early_stopping, _run)
+
+            if early_stopping.early_stop:
+                break
 
 
         self.save_model(os.path.join(save_dir, 'model.tar'))
@@ -115,7 +119,7 @@ class Vae(nn.Module):
             kl_weight = kl_scheduler.get_weight(current_iteration)
 
             for key in batch.keys():
-                if key not in ['tree_sizes', 'vocabs', 'oov_name_token2index']:
+                if key not in ['tree_sizes', 'vocabs', 'declared_names']:
                     batch[key] = batch[key].to(self.device)
 
             kl_loss, reconstruction_loss, individual_losses, accuracies = self(batch)
@@ -141,8 +145,11 @@ class Vae(nn.Module):
             
             # Save model to file every X iterations
             if current_iteration % save_every == save_every - 1 and save_dir is not None:
+                print('INFO - Saving model on train iteration: ', current_iteration + 1)
+                self.log_model_stats(current_iteration, save_every)
+
                 self.save_model(os.path.join(
-                    save_dir, f'iter{current_iteration}_{datetime.now().strftime("%d-%m-%Y_%H%M")}.tar'))
+                    save_dir, f'iter{current_iteration + 1}.tar'))
 
             # Check for early stopping every X iterations, run over validation dataset
             if current_iteration % check_early_stop_every == check_early_stop_every - 1:
@@ -153,11 +160,14 @@ class Vae(nn.Module):
                 # after validating, set model back to training mode
                 self.train()
 
+
         return current_iter_train + batch_index, current_iter_val
 
 
     def _val_epoch(self, val_loader, iterations_passed, early_stopping, _run):
         self.eval()
+
+        print('INFO - Going over validation set..')
 
         total_loss = 0
 
@@ -166,11 +176,11 @@ class Vae(nn.Module):
                 current_iteration = iterations_passed + batch_index
 
                 for key in batch.keys():
-                    if key not in ['tree_sizes', 'vocabs', 'oov_name_token2index']:
+                    if key not in ['tree_sizes', 'vocabs', 'declared_names']:
                         batch[key] = batch[key].to(self.device) 
 
                 z, kl_loss = self.encoder(batch)
-                reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch, batch['oov_name_token2index'])
+                reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch, batch['declared_names'])
 
                 loss = kl_loss + reconstruction_loss
                 total_loss += loss.item()
@@ -182,33 +192,48 @@ class Vae(nn.Module):
 
 
         early_stopping(total_loss)
+        print('INFO - Total validation loss: ', total_loss)
 
         return iterations_passed + batch_index
 
 
-    def test(self, test_loader):
+    def test(self, test_loader, save_folder=None):
         self.eval()
-        bleu_scores = {'bleu_1': 0, 'bleu_2': 0, 'bleu_3': 0, 'bleu_4': 0}
+        avg_tree_bleu_scores = {'bleu_1': 0, 'bleu_2': 0, 'bleu_3': 0, 'bleu_4': 0}
+        reconstructions = []
         iterations = 0
+
+        evaluator = Evaluator(self.vocabulary)
 
         with torch.no_grad():
             for batch in test_loader:
                 iterations += 1
-                reconstructions = self.evaluate(batch)
-                new_blue_scores = self.calculate_eval_scores(reconstructions, batch)
+                new_reconstructions = self.evaluate(batch)
+                
+                tree_bleu_scores = self.calculate_eval_scores(new_reconstructions, batch)
 
                 # Add bleu scores to our dictionary
-                for key, score in new_blue_scores.items():
-                    bleu_scores[key] += score
+                for key, score in tree_bleu_scores.items():
+                    avg_tree_bleu_scores[key] += score
 
-                if iterations > 10:
-                    break
+
+                # Add reconstructions to total reconstructions
+                reconstructions.extend(new_reconstructions)
+
+                evaluator.add_eval_hypotheses(batch)
+                evaluator.add_eval_references(new_reconstructions)
+
+                if save_folder is not None:
+                    evaluator.reconstructions_to_file(reconstructions, save_folder)
+
 
         # Get the average of the bleu scores over the entire test dataset
-        for key in bleu_scores.keys():
-            bleu_scores[key] /= iterations
+        for key in avg_tree_bleu_scores.keys():
+            avg_tree_bleu_scores[key] /= iterations
 
-        return bleu_scores, reconstructions
+        seq_bleu_scores = evaluator.calc_bleu_score()
+
+        return avg_tree_bleu_scores, seq_bleu_scores
 
 
     def evaluate(self, batch):
@@ -220,11 +245,11 @@ class Vae(nn.Module):
         reconstructions = []
 
         for key in batch.keys():
-            if key not in ['tree_sizes', 'vocabs', 'oov_name_token2index']:
+            if key not in ['tree_sizes', 'vocabs', 'declared_names']:
                 batch[key] = batch[key].to(self.device)
 
         z, _ = self.encoder(batch)
-        reconstructions += self.decoder(z, target=None, oov_name_token2index=batch['oov_name_token2index'])
+        reconstructions += self.decoder(z, target=None, oov_name_token2index=batch['declared_names'])
 
         return reconstructions
 
@@ -292,6 +317,30 @@ class Vae(nn.Module):
                 
         return features
 
+
+    def log_model_stats(self, current_iteration, save_every):
+        print('INFO - Model statistics:')
+        print('\t Avg Total loss / node: ', sum(list(self.metrics['Total loss / node train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        print('\t Avg acc parent: ', sum(list(self.metrics['Parent accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        print('\t Avg acc sibling: ', sum(list(self.metrics['Sibling accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        print('\t Avg acc is reserved: ', sum(list(self.metrics['Is reserved accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        print('\t Avg acc reserved label: ', sum(list(self.metrics['Reserved label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        print('\t Avg acc is type label: ', sum(list(self.metrics['Type label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        print('\t Avg acc literal: ', sum(list(self.metrics['Literal label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        print('\t Avg acc name builtin: ', sum(list(self.metrics['Name builtin label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        print('\t Avg acc name: ', sum(list(self.metrics['Name label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+
+
+    
+    def build_tree(self, adj_list, features, vocabs, index=0, parent_node=None):
+        node = Node(features[index].item(), is_reserved=vocabs[index] == 'RES', parent=parent_node)
+        children = adj_list[adj_list[:, 0] == index][:, 1]
+
+        for child in children:
+            self.build_tree(adj_list, features, vocabs, child, node)
+
+        return node
+
     def save_model(self, path):
         """
         Save the encoder, decoder and corresponding optimizer state dicts as well as losses to .tar
@@ -315,9 +364,10 @@ class Vae(nn.Module):
         @param path: Load a model from the given path
         """
 
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(path, map_location=self.device)
 
         try:
+            print(f'INFO - Loading weights from model: {path}')
             self.load_state_dict(checkpoint['state_dict'])
         except RuntimeError as e:
             print(f'INFO - {e}')

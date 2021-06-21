@@ -4,12 +4,12 @@ from datasets.AstDataset import AstDataset
 import utils.KLScheduling as KLScheduling
 from utils.ModelResults import ModelResults
 import os
-import json
 import csv
 import torch
 import math
 from torch.utils.data import DataLoader, BufferedShuffleDataset
 import sys
+import json
 from model_utils.vocabulary import Vocabulary
 from torch import optim
 from config.vae_config import ex
@@ -19,6 +19,7 @@ maxInt = sys.maxsize
 
 # Device configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 while True:
     # decrease the maxInt value by factor 10
@@ -66,7 +67,8 @@ class Trainer:
             'RES': None,
             'NAME': max_name_tokens + reusable_name_tokens,
             'TYPE': None,
-            'LITERAL': None
+            'LITERAL': None,
+            'NAME_BUILTIN': None,
         }
 
         vocabulary = Vocabulary(tokens_paths, max_tokens)
@@ -141,36 +143,39 @@ class Trainer:
             return KLScheduling.CyclicalAnnealing(iterations, kl_warmup_iters, kl_cycles, kl_ratio, kl_function)
 
 
+
+    @ex.capture
+    def save_config(self, save_dir, _config):
+        config_path = os.path.join(save_dir, 'config.json')
+
+        with open(config_path, 'w') as f:
+            json.dump(_config, f)
+
+
+
     @ex.capture
     def run(self, num_epochs, save_dir, _run):
         if save_dir is not None:
             save_dir = os.path.join(save_dir, str(_run._id))
             os.makedirs(save_dir, exist_ok=True)
+            self.save_config(save_dir)
+            
 
         self.model.fit(num_epochs, self.kl_scheduler, self.train_loader, self.val_loader, save_dir)
-        bleu_scores, reconstructions = self.model.test(self.test_loader)
+        avg_tree_bleu_scores, seq_bleu_scores = self.model.test(self.test_loader, str(_run._id))       
 
-        return bleu_scores
+        return avg_tree_bleu_scores, seq_bleu_scores
 
 
 @ex.main
 def main(_run):
     trainer = Trainer()
-    bleu_scores = trainer.run()
+    avg_tree_bleu_scores, seq_bleu_scores = trainer.run()
     
-    results = ModelResults()
-    results.from_dict(bleu_scores)
+    # results = ModelResults()
+    # results.from_dict(bleu_scores)
 
-    return {'results': results}
+    return {'seq_bleu_scores': seq_bleu_scores, 'avg_tree_bleu_scores': avg_tree_bleu_scores}
 
 if __name__ == "__main__":
     ex.run_commandline()
-
-
-
-
-
-
-    # save_dir = 'checkpoints/' + f'{params["LATENT_DIM"]}latent' + f'_{params["HIDDEN_SIZE"]}hidden' + \
-    # f'{"_weightedloss" if params["WEIGHTED_LOSS"] else ""}' + \
-    # f'{"_indivlayers" if params["INDIV_LAYERS_VOCABS"] else ""}' + '/'

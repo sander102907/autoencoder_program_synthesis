@@ -4,9 +4,8 @@ import torch.nn.functional as F
 import numpy as np
 from utils.TreeNode import Node
 from utils.Sampling import Sampling
-from time import time
 from model_utils.modules import AddGate, PredictiveHidden, TreeTopologyPred, MultiLayerLSTMCell
-from model_utils.state import TreeState
+from model_utils.distance_functions import CosineDistance
 from config.vae_config import ex
 
 
@@ -25,6 +24,8 @@ class TreeLstmDecoderComplete(nn.Module):
                  latent_dim, 
                  use_cell_output_lstm, 
                  num_rnn_layers_dec,
+                 dropout,
+                 recurrent_dropout,
                  indiv_embed_layers,
                  max_name_tokens
                  ):
@@ -48,8 +49,8 @@ class TreeLstmDecoderComplete(nn.Module):
         self.latent2hidden = nn.Linear(self.latent_dim, rnn_hidden_size)
 
         # Doubly recurrent network layers: parent and sibling RNNs
-        self.rnns_parent = MultiLayerLSTMCell(embedding_dim, rnn_hidden_size, num_rnn_layers_dec)
-        self.rnns_sibling = MultiLayerLSTMCell(embedding_dim, rnn_hidden_size, num_rnn_layers_dec)
+        self.rnns_parent = MultiLayerLSTMCell(embedding_dim, rnn_hidden_size, num_rnn_layers_dec, recurrent_dropout)
+        self.rnns_sibling = MultiLayerLSTMCell(embedding_dim, rnn_hidden_size, num_rnn_layers_dec, recurrent_dropout)
 
         self.pred_hidden_state = PredictiveHidden(rnn_hidden_size)
 
@@ -60,6 +61,10 @@ class TreeLstmDecoderComplete(nn.Module):
         # Learnable weights to incorporate topology information in label prediction
         self.offset_parent = nn.Linear(1, 1, bias=True)
         self.offset_sibling = nn.Linear(1, 1, bias=True)
+
+
+        self.name_ref_weights = nn.Linear(rnn_hidden_size, rnn_hidden_size, bias=True)
+        self.name_decl_weights = nn.Linear(rnn_hidden_size, rnn_hidden_size, bias=True)
 
         # Leaf lstms, if we want individual RNNs for leaf nodes
         self.leaf_lstms_sibling = nn.ModuleDict({})
@@ -73,6 +78,8 @@ class TreeLstmDecoderComplete(nn.Module):
         # Loss functions for labels for each vocab so we can specify weights if needed
         self.label_losses = nn.ModuleDict({})
 
+        self.dropout = nn.Dropout(dropout)
+
 
         # For evaluation/testing/generating:
 
@@ -82,6 +89,12 @@ class TreeLstmDecoderComplete(nn.Module):
         # softmax to get probability distribution for labels of nodes
         self.softmax = nn.LogSoftmax(dim=-1)
 
+        # Cosine similarity to get the similarity between name declarations and references
+        self.dist_function = CosineDistance(dim=-1)
+
+        self.triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=self.dist_function, reduction='sum', margin=1)
+
+        self.relu = nn.ReLU()
 
         # Initialize layers
         self.init_layers()
@@ -97,8 +110,11 @@ class TreeLstmDecoderComplete(nn.Module):
                     self.label_losses[vocab_name] = nn.AdaptiveLogSoftmaxWithLoss(
                                                         self.rnn_hidden_size,
                                                         self.vocabulary.get_vocab_size(vocab_name),
-                                                        cutoffs=[10, 100, 1000],
+                                                        cutoffs=[10, 100, 300],
                                                         div_value=3.0)
+
+            elif vocab_name == 'NAME':
+                self.label_losses[vocab_name] = None
             else:
                 # Prediction layer
                 self.prediction_layers[vocab_name] = nn.Linear(self.rnn_hidden_size, self.vocabulary.get_vocab_size(vocab_name))
@@ -150,9 +166,14 @@ class TreeLstmDecoderComplete(nn.Module):
                 h_s.append(torch.zeros(total_nodes, self.rnn_hidden_size, device=self.device))
                 c_s.append(torch.zeros(total_nodes, self.rnn_hidden_size, device=self.device))
 
+            # Save predictive hidden states for name clustering
+            # h_pred_states = torch.zeros(total_nodes, self.rnn_hidden_size, device=self.device)
+
+            declared_names = [{} for _ in range(len(target['tree_sizes']))]
+
             # Iterate over the levels of the tree -> top down
             for iteration in range(node_order.max() + 1):
-                loss = self.decode_train(iteration, z, target, h_p, c_p, h_s, c_s, individual_losses, accuracies)
+                loss = self.decode_train(iteration, z, target, h_p, c_p, h_s, c_s, declared_names, individual_losses, accuracies)
                 total_loss += loss
 
             for loss_type in loss_types:
@@ -163,6 +184,8 @@ class TreeLstmDecoderComplete(nn.Module):
                     if loss_type == 'RES':
                         # Correct for root node -> is not predicted
                         accuracies[loss_type] = accuracies[loss_type] / (sum(target['vocabs'] == loss_type) - z.shape[0])
+                    elif loss_type == 'NAME':
+                        accuracies[loss_type] = accuracies[loss_type] / (sum(target['vocabs'] == loss_type) - sum([len(tree) for tree in declared_names]))
                     else:
                         accuracies[loss_type] = accuracies[loss_type] / sum(target['vocabs'] == loss_type)
 
@@ -174,7 +197,7 @@ class TreeLstmDecoderComplete(nn.Module):
             return trees
 
 
-    def decode_train(self, iteration, z, data, h_p, c_p, h_s, c_s, individual_losses, accuracies):
+    def decode_train(self, iteration, z, data, h_p, c_p, h_s, c_s, declared_names, individual_losses, accuracies):
         loss = 0
 
         node_order = data['node_order_topdown']
@@ -185,6 +208,7 @@ class TreeLstmDecoderComplete(nn.Module):
         adjacency_list = data['adjacency_list'].cpu()
         adjacency_list_sib = data['adjacency_list_sib'].cpu()
         vocabs = np.array(data['vocabs'])
+        tree_indices = data['tree_indices']
 
         if iteration == 0:
             hidden = self.latent2hidden(z)
@@ -224,6 +248,8 @@ class TreeLstmDecoderComplete(nn.Module):
 
             parent_indices = adjacency_list[edge_mask, :][:, 0]
 
+            prev_sib_indices = adjacency_list_sib[edge_mask_sib, :][:, 0]
+
             curr_h_p = []
             curr_c_p = []
 
@@ -231,7 +257,6 @@ class TreeLstmDecoderComplete(nn.Module):
                 curr_h_p.append(h_p[i][parent_indices, :])
                 curr_c_p.append(c_p[i][parent_indices, :])
 
-            prev_sib_indices = adjacency_list_sib[edge_mask_sib, :][:, 0]
 
             curr_h_s = []
             curr_c_s = []
@@ -250,6 +275,8 @@ class TreeLstmDecoderComplete(nn.Module):
                 sibling_state = curr_h_s[-1]
 
             h_pred = self.pred_hidden_state(parent_state, sibling_state)
+
+            h_pred = self.dropout(h_pred)
 
             parent_state_updated = parent_state + self.add_gate(sibling_state)
 
@@ -286,11 +313,11 @@ class TreeLstmDecoderComplete(nn.Module):
             accuracies['IS_RES'] += sum(
                 (self.sigmoid(res_pred) >= 0.5) == (is_res == 1)).item()
 
-
             label = features[node_mask].long()
 
+
             # Iterate over possible node types and predict labels for each node type
-            for k, prediction_layer in list(self.prediction_layers.items()) + [('LITERAL', '_')]:
+            for k, prediction_layer in list(self.prediction_layers.items()) + [('LITERAL', '_'), ('NAME', '_')]:
                 # Only do actual calculations when the amount of nodes for this node type > 0
                 if len(h_pred[vocabs[node_mask] == k]) > 0:
                     # Get label predictions
@@ -302,6 +329,48 @@ class TreeLstmDecoderComplete(nn.Module):
 
                         accuracies[k] += sum(self.label_losses[k].predict(h_pred[vocabs[node_mask] == k])
                                             == label[vocabs[node_mask] == k].view(-1)).item()
+
+                        loss += label_loss
+                        individual_losses[k] += label_loss.item()
+                    elif k == 'NAME':
+                        # Get the indices of the current name nodes we are evaluating
+                        node_mask_indices = torch.where(torch.tensor(vocabs[node_mask] == k))[0]
+
+                        # Loop over the name labels we are evaluating
+                        for idx, l in zip(node_mask_indices, label[node_mask_indices]):
+                            # Get the current node index (from all nodes, not just the selection)
+                            current_node_idx = torch.where(node_mask)[0][idx]
+
+                            # Get the declared names of the program we are evaluating
+                            program_declared_names = declared_names[tree_indices[node_mask][idx]]
+
+                            # Remove the declared names that are defined after the current node
+                            program_declared_names_filt = {k: v for k, v in program_declared_names.items() if program_declared_names[k][0] < current_node_idx}
+
+                            # If the name is already declared -> calculate loss: triplet between declaration as positive
+                            #  and between other declarations as negative
+                            if l.item() in program_declared_names_filt:
+                                positive = self.relu(self.name_ref_weights(h_pred[idx]).unsqueeze(0))
+                               
+                                if len(program_declared_names_filt) > 1:
+                                    # create a name prediction state to make the h_pred of the name similar to the h_pred of the declaration
+                                    anchor = program_declared_names_filt[l.item()][1]
+                                    negative = torch.stack([v[1] for k, v in program_declared_names_filt.items() if k != l.item()])
+
+                                    name_ref_loss = self.triplet_loss(anchor, positive, negative)
+
+                                    loss += name_ref_loss
+                                    individual_losses[k] += name_ref_loss.item()
+
+                                
+                                distances = self.dist_function(positive, torch.stack([v[1] for v in program_declared_names_filt.values()]))
+                                most_similar = list(program_declared_names_filt.keys())[torch.argmin(distances)]
+
+                                # topk = min(3, len(program_declared_names))
+                                # most_similar = torch.tensor(list(program_declared_names.keys()))[torch.topk(distances, k=topk, largest=False)[1]]
+                                accuracies[k] +=  l.item() == most_similar
+                            else:
+                                program_declared_names[l.item()] = (current_node_idx, self.relu(self.name_decl_weights(h_pred[idx])))
 
                     else:
                         label_pred = prediction_layer(h_pred[vocabs[node_mask] == k])
@@ -321,9 +390,9 @@ class TreeLstmDecoderComplete(nn.Module):
                         # print(k, h_pred[vocabs[node_mask] == k], parent_state, sibling_state)
                         # pred_labels = torch.argmax(self.softmax(label_pred), dim=-1)
                         # print(iteration, k, pred_labels[pred_labels != label[vocabs[node_mask] == k].view(-1)].tolist(), pred_labels.tolist(), label[vocabs[node_mask] == k].view(-1).tolist()) #, self.softmax(label_pred).topk(3, sorted=True)[1], self.softmax(label_pred).topk(3, sorted=True)[0], h_pred[:, :5],)
-                    loss += label_loss #* max(-100 * iteration + 200, 1)
+                        loss += label_loss #* max(-100 * iteration + 200, 1)
 
-                    individual_losses[k] += label_loss.item()
+                        individual_losses[k] += label_loss.item()
 
                     if self.indiv_embed_layers:
                         self.update_rnn_state(h_p, c_p, h_s, c_s, features, k, curr_h_p, curr_c_p, curr_h_s, curr_c_s, vocabs, node_mask)
@@ -339,15 +408,13 @@ class TreeLstmDecoderComplete(nn.Module):
         # Get true label values
         label = features[node_mask].long()
 
-
-        # Calculate embedding of true label -> teacher forcing
-
         if self.indiv_embed_layers:
             mask = vocabs[node_mask] == node_type
         else:
             mask = [True] * len(vocabs[node_mask])       
 
 
+        # Calculate embedding of true label -> teacher forcing
         emb_label = self.embedding_layers[node_type](label[mask]).view(-1, self.embedding_dim)
         
 
@@ -416,8 +483,8 @@ class TreeLstmDecoderComplete(nn.Module):
         return trees
 
 
-    def decode_eval(self, parent_state, sibling_state, oov_name_index2token, parent_nodes=None, iteration=0):
-        if iteration > 50:
+    def decode_eval(self, parent_state, sibling_state, oov_name_index2token, parent_nodes=None, declared_names=None, program_ids=None, iteration=0):
+        if iteration > 30:
             print(f'Stopped due to recursion level going over {iteration} iterations')
             return parent_nodes
 
@@ -431,6 +498,8 @@ class TreeLstmDecoderComplete(nn.Module):
 
             # Create root node of the tree
             parent_nodes = [Node(root_id, is_reserved=True, parent=None) for _ in range(batch_size)]
+            declared_names = [{} for _ in range(batch_size)]
+            program_ids = torch.tensor([i for i in range(batch_size)])
 
             # Update the parent state
             # emb_label = self.embedding_layers['RES'](torch.tensor([root_id], device=self.device)).view(-1, self.params['EMBEDDING_DIM'])
@@ -445,7 +514,7 @@ class TreeLstmDecoderComplete(nn.Module):
 
 
             # Pass new parent state and no sibling state as we start with the first sibling
-            self.decode_eval(parent_state, sibling_state, oov_name_index2token, parent_nodes)
+            self.decode_eval(parent_state, sibling_state, oov_name_index2token, parent_nodes, declared_names, program_ids)
 
         else:
             h_parent, c_parent = parent_state[-1]
@@ -457,7 +526,6 @@ class TreeLstmDecoderComplete(nn.Module):
                 h_prev_sibling = torch.cat([h_prev_sibling, c_prev_sibling], dim=-1)
 
             h_pred = self.pred_hidden_state(h_parent, h_prev_sibling)
-
 
             # sibling add gate to add to parent state           
             parent_state_updated = h_parent + self.add_gate(h_prev_sibling)
@@ -477,21 +545,25 @@ class TreeLstmDecoderComplete(nn.Module):
             # Probability of the node being a reserved c++ token
             p_res = self.sigmoid(res_pred)
 
+
             # Sample is_parent and has_sibling from predicted probability of parent/sibling
-            # is_parent = (p_parent >= 0.5).view(-1)
-            # has_sibling = (p_sibling >= 0.5).view(-1)
-            is_parent = (torch.distributions.bernoulli.Bernoulli(p_parent).sample() == 1).view(-1)
-            has_sibling = (torch.distributions.bernoulli.Bernoulli(p_sibling).sample() == 1).view(-1)
+            is_parent = (p_parent >= 0.5).view(-1)
+            has_sibling = (p_sibling >= 0.5).view(-1)
+            # is_parent = (torch.distributions.bernoulli.Bernoulli(p_parent).sample() == 1).view(-1)
+            # has_sibling = (torch.distributions.bernoulli.Bernoulli(p_sibling).sample() == 1).view(-1)
 
             is_res = (p_res >= 0.5).view(-1)
 
-            """
-                Node types:
-                    - NAME:     0
-                    - RES:      1
-                    - LITERAL:  2
-                    - TYPE:     3
-            """
+
+            n_types = {
+                0: 'NAME',
+                1: 'NAME_BUILTIN',
+                2: 'RES',
+                3: 'LITERAL',
+                4: 'TYPE'
+                }
+
+            
 
             node_types = torch.zeros(batch_size, device=self.device)
 
@@ -503,28 +575,53 @@ class TreeLstmDecoderComplete(nn.Module):
                 else:
                     parent_labels.append('default token')
 
-            # parent_labels = np.array([self.vocabulary.index2token['RES'][parent_node.token] for parent_node in parent_nodes])
+            # print(parent_labels, '\n', p_parent, '\n',  p_sibling, '\n',  p_res, '\n\n')
 
+            name_builtin_indices = [idx for idx, label in enumerate(parent_labels) if 'REF_BUILTIN' == label]
             literal_indices = [idx for idx, label in enumerate(parent_labels) if 'LITERAL' in label]
             type_indices = [idx for idx, label in enumerate(parent_labels) if 'TYPE' == label]
 
-            node_types[is_res] = 1
-            node_types[literal_indices] = 2
-            node_types[type_indices] = 3
+            node_types[name_builtin_indices] = 1
+            node_types[is_res] = 2
+            node_types[literal_indices] = 3
+            node_types[type_indices] = 4
 
             name_indices = node_types == 0
 
             label_logits_res = self.prediction_layers['RES'](h_pred[is_res])
             label_logits_type = self.prediction_layers['TYPE'](h_pred[type_indices])
-            label_logits_name = self.prediction_layers['NAME'](h_pred[name_indices])
+            label_logits_name_builtin = self.prediction_layers['NAME_BUILTIN'](h_pred[name_builtin_indices])
             label_logits_literal = self.label_losses['LITERAL'].log_prob(h_pred[literal_indices])
+
 
             predicted_labels = torch.zeros(batch_size, dtype=torch.long, device=self.device)
 
-            predicted_labels[is_res] = Sampling.sample(label_logits_res, temperature=0.9, top_k=40, top_p=0.9).view(-1)
-            predicted_labels[type_indices] = Sampling.sample(label_logits_type, temperature=0.9, top_k=40, top_p=0.9).view(-1)
-            predicted_labels[name_indices] = Sampling.sample(label_logits_name, temperature=0.9, top_k=40, top_p=0.9).view(-1)
-            predicted_labels[literal_indices] = Sampling.sample(label_logits_literal, temperature=0.9, top_k=40, top_p=0.5).view(-1)
+
+            predicted_labels[is_res] = Sampling.sample(label_logits_res, temperature=0.7, top_k=40, top_p=0.9).view(-1)
+            predicted_labels[type_indices] = Sampling.sample(label_logits_type, temperature=0.7, top_k=40, top_p=0.9).view(-1)
+            predicted_labels[name_builtin_indices] = Sampling.sample(label_logits_name_builtin, temperature=0.7, top_k=40, top_p=0.9).view(-1)
+            predicted_labels[literal_indices] = Sampling.sample(label_logits_literal, temperature=0.7, top_k=40, top_p=0.9).view(-1)
+
+            predicted_name_labels = []
+
+            for idx, name_idx in enumerate(torch.where(name_indices)[0]):
+                # If the parent is not a reference or the number of delcarations is 0
+                if 'REF' not in parent_labels[name_idx] or len(list(declared_names[program_ids[name_idx]])) == 0 or len(list(declared_names[program_ids[name_idx]])) >= self.vocabulary.get_vocab_size('NAME') - 1:
+                    name_label = len(declared_names[program_ids[name_idx]])
+                    declared_names[program_ids[name_idx]][name_label] = self.relu(self.name_decl_weights(h_pred[name_idx]))
+
+                    predicted_name_labels.append(name_label)
+                else:
+                    names_in_program = torch.stack(list(declared_names[program_ids[name_idx]].values()))
+                    current_name = self.relu(self.name_ref_weights(h_pred[name_idx]))
+
+
+                    distances = self.dist_function(current_name, names_in_program)
+                    most_similar = list(declared_names[program_ids[name_idx]].keys())[torch.argmin(distances)]
+
+                    predicted_name_labels.append(most_similar)
+
+            predicted_labels[name_indices] = torch.tensor(predicted_name_labels, dtype=torch.long, device=self.device)
 
             nodes = []
 
@@ -533,53 +630,69 @@ class TreeLstmDecoderComplete(nn.Module):
                 if node_types[idx] == 0:
                     if predicted_label.item() < self.max_name_tokens:
                         node = Node(predicted_label.item(), is_reserved=False, parent=parent_nodes[idx])
-                    elif oov_name_index2token is not None and predicted_label.item() in oov_name_index2token[idx]:
-                        node = Node(oov_name_index2token[idx][predicted_label.item(
-                        )], is_reserved=False, parent=parent_nodes[idx])
+                    # elif oov_name_index2token is not None and predicted_label.item() in oov_name_index2token[idx]:
+                    #     node = Node(oov_name_index2token[idx][predicted_label.item(
+                    #     )], is_reserved=False, parent=parent_nodes[idx])
                     else:
                         node = Node(f'NAME_{predicted_label.item()}', is_reserved=False, parent=parent_nodes[idx])
                 else:
-                    node = Node(predicted_label.item(
-                    ), is_reserved=True if node_types[idx] == 1 else False, parent=parent_nodes[idx])
+                    node = Node(predicted_label.item(),
+                                is_reserved=True if node_types[idx] == 2 else False,
+                                parent=parent_nodes[idx])
 
                 nodes.append(node)
 
 
-            emb_labels = torch.zeros(batch_size, self.embedding_dim, device=self.device)
+            if self.indiv_embed_layers:
+                emb_labels = torch.zeros(batch_size, self.embedding_dim, device=self.device)
 
+                for node_type, emb_layer in self.embedding_layers.items():
+                    if node_type == 'RES':
+                        mask = is_res
+                    elif node_type == 'LITERAL':
+                        mask = literal_indices
+                    elif node_type == 'TYPE':
+                        mask = type_indices
+                    elif node_type == 'NAME_BUILTIN':
+                        mask = name_builtin_indices
+                    else:
+                        mask = name_indices
 
-            for node_type, emb_layer in self.embedding_layers.items():
-                if node_type == 'RES':
-                    mask = is_res
-                elif node_type == 'LITERAL':
-                    mask = literal_indices
-                elif node_type == 'TYPE':
-                    mask = type_indices
-                else:
-                    mask = name_indices
+                    emb_labels[mask] = emb_layer(predicted_labels[mask]).view(-1, self.embedding_dim)
+            else:
+                # predicted_labels[is_res] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['RES'][token.item()]] for token in predicted_labels[is_res]], dtype=torch.long, device=self.device)
+                # predicted_labels[type_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['TYPE'][token.item()]] for token in predicted_labels[type_indices]], dtype=torch.long, device=self.device)
+                # predicted_labels[name_builtin_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['NAME_BUILTIN'][token.item()]] for token in predicted_labels[name_builtin_indices]], dtype=torch.long, device=self.device)
+                # predicted_labels[literal_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['LITERAL'][token.item()]] for token in predicted_labels[literal_indices]], dtype=torch.long, device=self.device)
+                # predicted_labels[name_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['NAME'][token.item()]] for token in predicted_labels[name_indices]], dtype=torch.long, device=self.device)
 
-                emb_labels[mask] = self.embedding_layers[node_type](
-                        predicted_labels[mask]).view(-1, self.embedding_dim)
+                predicted_labels = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token[n_types[n_type.item()]][token.item()]] for token, n_type in zip(predicted_labels, node_types)],dtype=torch.long, device=self.device)
+                emb_labels = self.embedding_layers['ALL'](predicted_labels).view(-1, self.embedding_dim)
 
-
+            # Lists to save the new parent and sibling states
             total_sibling_state = []
             total_parent_state = []
 
             empty_init = torch.zeros(batch_size, self.rnn_hidden_size, device=self.device)
 
+            # Get new siblings state, if there are any next siblings
             if torch.count_nonzero(has_sibling) > 0:
                 new_sibling_state = self.rnns_sibling(emb_labels, sibling_state)   
             else:
                 new_sibling_state = [(empty_init, empty_init) for _ in range(self.num_rnn_layers_dec)]
 
+
+            # Create a copy of the parent state (we need the original for the next siblings)
             new_parent_state = parent_state[:]
 
+            # Update the las layer of the parent state with the add gate update
             if self.use_cell_output_lstm: 
                 new_parent_state[-1] = parent_state_updated
             else:
                 new_parent_state[-1] = (parent_state_updated, new_parent_state[-1][1])
 
 
+            # Get new parent state, if there are any next children
             if torch.count_nonzero(is_parent) > 0:
                 new_parent_state = self.rnns_parent(emb_labels, new_parent_state)
             else:
@@ -590,37 +703,60 @@ class TreeLstmDecoderComplete(nn.Module):
 
 
             for i in range(self.num_rnn_layers_dec):
+                # Get the parent states, for the next children nodes
                 p_state_h_par = new_parent_state[i][0][is_parent]
                 p_state_c_par = new_parent_state[i][1][is_parent]
 
+                # Get the parent states, for the next sibling nodes
+                # Note that we do not use the new parent state here
+                # As next siblings have the same parent
                 p_state_h_sib = parent_state[i][0][has_sibling]
                 p_state_c_sib = parent_state[i][1][has_sibling]
 
+                # Concatenate the parent states, children first then siblings
                 p_state_h = torch.cat([p_state_h_par, p_state_h_sib])
                 p_state_c = torch.cat([p_state_c_par, p_state_c_sib])
 
+                # Append parent states of this RNN layer to total state
                 total_parent_state.append((p_state_h, p_state_c))
 
 
+                # Get the sibling states, for the next children nodes
+                # Note, new children do not have any siblings
                 s_state_h_par = empty_init
                 s_state_c_par = empty_init
 
+                # Get the sibling states, for the next sibling nodes
                 s_state_h_sib = new_sibling_state[i][0][has_sibling]
                 s_state_c_sib = new_sibling_state[i][1][has_sibling]
 
-                p_state_h = torch.cat([s_state_h_par, s_state_h_sib])
-                p_state_c = torch.cat([s_state_c_par, s_state_c_sib])
+                # Concatenate the sibling states, children first, then siblings
+                s_state_h = torch.cat([s_state_h_par, s_state_h_sib])
+                s_state_c = torch.cat([s_state_c_par, s_state_c_sib])
+
+                # Append sibling states of this RNN layer to the total state
+                total_sibling_state.append((s_state_h, s_state_c))
 
 
-                total_sibling_state.append((p_state_h, p_state_c))
+            # Update the parent nodes, children first, then siblings
+            parent_nodes = [node for is_p, node in zip(is_parent, nodes) if is_p] \
+                         + [node for has_s, node in zip(has_sibling, parent_nodes) if has_s]
 
 
-            parent_nodes = [node for is_p, node in zip(is_parent, nodes) if is_p] + [node for has_s, node in zip(has_sibling, parent_nodes) if has_s]
+            # Update the oov name index to token vocabs, children first, then siblings
             if oov_name_index2token is not None: 
-                oov_name_index2token = [vocab for is_p, vocab in zip(is_parent, oov_name_index2token) if is_p] +  [vocab for has_s, vocab in zip(has_sibling, oov_name_index2token) if has_s]
+                oov_name_index2token = [vocab for is_p, vocab in zip(is_parent, oov_name_index2token) if is_p] \
+                                     + [vocab for has_s, vocab in zip(has_sibling, oov_name_index2token) if has_s]
 
+
+            # update the program ids (to keep track of declared names), children first, then siblings
+            program_ids = [idx for is_p, idx in zip(is_parent, program_ids) if is_p] \
+                        + [idx for has_s, idx in zip(has_sibling, program_ids) if has_s]
+
+
+            # If there are next children or siblings, recursively continue
             if torch.count_nonzero(has_sibling) > 0 or torch.count_nonzero(is_parent) > 0:
-                self.decode_eval(total_parent_state, total_sibling_state, oov_name_index2token, parent_nodes, iteration + 1)
+                self.decode_eval(total_parent_state, total_sibling_state, oov_name_index2token, parent_nodes, declared_names, program_ids, iteration + 1)
 
 
         # If we are done, return the parent nodes (which contain the entire trees)

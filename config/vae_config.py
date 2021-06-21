@@ -4,8 +4,9 @@ from sacred.observers import MongoObserver
 EXPERIMENT_NAME = 'Experiment'
 DATABASE_NAME = 'Autoencoder_program_synthesis'
 URL = f'mongodb+srv://sander:9AqrPVfuPJuv0ajP@cluster0.b2wvr.mongodb.net/{DATABASE_NAME}?retryWrites=true&w=majority'
+URL = None
 
-ex = Experiment('Experiment')
+ex = Experiment(EXPERIMENT_NAME)
 
 ex.observers.append(MongoObserver.create(url=URL, db_name=DATABASE_NAME))
 
@@ -16,17 +17,19 @@ def get_config():
     """
 
     # Standard model parameters
-    num_epochs = 10
-    batch_size = 16
+    num_epochs = 100
+    batch_size = 32
     learning_rate = 1e-4   
-    num_rnn_layers_enc = 1  # The number of RNN layers for the encoder (>1 gives stacked RNN)
-    num_rnn_layers_dec = 1  # The number of RNN layers for the decoder (>1 gives stacked RNN)
-    rnn_hidden_size = 200   # The hidden size of the RNN
-    latent_dim = 100        # The latent vector size
+    num_rnn_layers_enc = 2  # The number of RNN layers for the encoder (>1 gives stacked RNN)
+    num_rnn_layers_dec = 2  # The number of RNN layers for the decoder (>1 gives stacked RNN)
+    rnn_hidden_size = 300   # The hidden size of the RNN
+    latent_dim = 150        # The latent vector size
     embedding_dim = 50      # The embedding dimension (if pretrained embedding is set, will automatically take that size)
+    dropout = 0.2             # Dropout rate
+    recurrent_dropout = 0.2   # Dropout rate for the RNN layers
     clip_grad_norm = 0      # clip the gradient norm, setting to 0 ignores this 
     clip_grad_val = 0       # clip the gradient value, setting to 0 ignores this
-    save_every = 1000       # Save per X batches
+    save_every = 500        # Save per X batches
     save_dir = 'checkpoints'
 
     # Torch data loader parameters
@@ -34,8 +37,8 @@ def get_config():
 
     # Data parameters
     max_tree_size = 750             # Only use trees of size (in terms of nodes) below max tree size 
-    max_name_tokens = 300         # Only use the most frequent max name tokens
-    reusable_name_tokens = 100      # The rest of the name tokens are indexed to reusable ID's
+    max_name_tokens = 0             # Only use the most frequent max name tokens
+    reusable_name_tokens = 150      # The rest of the name tokens are indexed to reusable ID's
 
     # Advanced model parameters
     pretrained_emb = 'glove-wiki-gigaword-50'   # Pretrained embedding to use (https://github.com/RaRe-Technologies/gensim-data/blob/master/list.json)
@@ -56,34 +59,36 @@ def get_config():
 
 
     # Early stopping parameters
-    check_early_stop_every = 500                # Update early stop loss every X batches
-    early_stop_patience = 3                     # how many steps to wait before stopping when loss is not improving
+    check_early_stop_every = 1000                # Update early stop loss every X batches
+    early_stop_patience = 5                     # how many steps to wait before stopping when loss is not improving
     early_stop_min_delta = 0                    # minimum difference between new loss and old loss for new loss to be considered as an improvement
 
 
     # Load pretrained model
-    pretrained_model = 'checkpoints/100latent_200hidden/VAE_epoch2_batch3999_26-05-2021_1302.tar'
+    pretrained_model = None
 
 
     # Data path parameters
     tokens_paths = {
-        'NAME': '../data/ast_trees_full_19-05-2021/name_tokens/',
-        'RES': '../data/ast_trees_full_19-05-2021/reserved_tokens/',
-        'TYPE': '../data/ast_trees_full_19-05-2021/type_tokens/',
-        'LITERAL': '../data/ast_trees_full_19-05-2021/literal_tokens/',
-        # 'NAME': '../data/test_dataset/name_tokens/',
-        # 'RES': '../data/test_dataset/reserved_tokens/',
-        # 'TYPE': '../data/test_dataset/type_tokens/',
-        # 'LITERAL': '../data/test_dataset/literal_tokens/',
+        # 'NAME': '../data/ast_trees_full_10-06-2021_2/name_tokens/',
+        # 'NAME_BUILTIN': '../data/ast_trees_full_10-06-2021_2/name_builtin_tokens/',
+        # 'RES': '../data/ast_trees_full_10-06-2021_2/reserved_tokens/',
+        # 'TYPE': '../data/ast_trees_full_10-06-2021_2/type_tokens/',
+        # 'LITERAL': '../data/ast_trees_full_10-06-2021_2/literal_tokens/',
+        'NAME': '../data/ast_trees/name_tokens/',
+        'NAME_BUILTIN': '../data/ast_trees/name_builtin_tokens/',
+        'RES': '../data/ast_trees/reserved_tokens/',
+        'TYPE': '../data/ast_trees/type_tokens/',
+        'LITERAL': '../data/ast_trees/literal_tokens/',
     }
 
     dataset_paths = {
-        'TRAIN': '../data/ast_trees_full_19-05-2021/asts_train/',
-        'VAL': '../data/ast_trees_full_19-05-2021/asts_val/',
-        'TEST': '../data/ast_trees_full_19-05-2021/asts_test/'
-        # 'TRAIN': '../data/test_dataset/asts_train/',
-        # 'VAL': '../data/test_dataset/asts_val/',
-        # 'TEST': '../data/test_dataset/asts_test/'  
+        # 'TRAIN': '../data/ast_trees_full_10-06-2021_2/asts_train/',
+        # 'VAL': '../data/ast_trees_full_10-06-2021_2/asts_val/',
+        # 'TEST': '../data/ast_trees_full_10-06-2021_2/asts_test/'
+        'TRAIN': '../data/ast_trees/asts_train/',
+        'VAL': '../data/ast_trees/asts_val/',
+        'TEST': '../data/ast_trees/asts_test/'  
     } 
 
 

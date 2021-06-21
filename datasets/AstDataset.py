@@ -6,7 +6,6 @@ from treelstm import calculate_evaluation_orders
 from utils.TreeLstmUtils import calculate_evaluation_orders_topdown
 import os
 import bz2
-from functools import partial
 import math
 
 
@@ -63,11 +62,11 @@ class AstDataset(IterableDataset):
                 for ast in file_iterator:
                     if self.get_statistics_only:
                         nodes, depths = self.get_statistics(ast)
-                        if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
+                        if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
                             yield nodes, depths, ast
                     else:
                         tree, nodes = self.preprocess(ast)
-                        if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
+                        if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
                             yield tree
 
         # iterate over files that have to be shared between workers
@@ -89,11 +88,11 @@ class AstDataset(IterableDataset):
                     if worker_id - (file_index * workers_per_shared_file) == i % workers_per_shared_file:
                         if self.get_statistics_only:
                             nodes, depths = self.get_statistics(ast)
-                            if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
+                            if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
                                 yield nodes, depths, ast
                         else:
                             tree, nodes = self.preprocess(ast)
-                            if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1:
+                            if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
                                 yield tree
 
     def preprocess(self, ast):
@@ -104,7 +103,10 @@ class AstDataset(IterableDataset):
         nodes = self.get_amt_nodes(tree)
 
         if nodes > 1:
-            tree = self.convert_tree_to_tensors(tree)
+            try:
+                tree = self.convert_tree_to_tensors(tree)
+            except Exception as e:
+                tree = {}
         else:
             tree = {}
 
@@ -150,33 +152,55 @@ class AstDataset(IterableDataset):
                 n = self._label_node_index(child, n)
         return n
 
-    def _gather_node_attributes(self, node, key, parent=None, oov_name_token2index=None):
-        if oov_name_token2index is None:
-            oov_name_token2index = {}
+    def _gather_node_attributes(self, node, key, parent=None, declared_names=None):
+        if declared_names is None:
+            declared_names = DeclaredNames(self.nr_of_names_to_keep)
 
         if self.vocabulary.token2index is not None:
             if node['res']:
                 feature = self.vocabulary.token2index['RES'][node[key]]
                 vocab = 'RES'
             else:
-                if 'LITERAL' in self.vocabulary.token2index.keys() and 'LITERAL' in parent['token']:
+                if 'LITERAL' in self.vocabulary.token2index.keys() and 'LITERAL' in parent[key]:
                     feature = self.vocabulary.token2index['LITERAL'][node[key]]
                     vocab = 'LITERAL'
-                elif 'TYPE' in self.vocabulary.token2index.keys() and 'TYPE' == parent['token']:
+                elif 'TYPE' in self.vocabulary.token2index.keys() and 'TYPE' == parent[key]:
                     feature = self.vocabulary.token2index['TYPE'][node[key]]
                     vocab = 'TYPE'
+                elif 'NAME_BUILTIN' in self.vocabulary.token2index.keys() and 'REF_BUILTIN' in parent[key]:
+                    feature = self.vocabulary.token2index['NAME_BUILTIN'][node[key]]
+                    vocab = 'NAME_BUILTIN'
                 elif 'NAME' in self.vocabulary.token2index.keys():
                     token = node[key]
+
+                    if 'decl_line' in node:
+                        decl_line = node['decl_line']
+                    else:
+                        decl_line = None
 
                     if token in list(self.vocabulary.token2index['NAME'].keys())[:self.nr_of_names_to_keep]:
                         feature = self.vocabulary.token2index['NAME'][token]
 
-                    elif token in oov_name_token2index:
-                        feature = oov_name_token2index[token]
+                    elif not 'REF' in parent[key] or not declared_names.is_declared(token, decl_line):
+                        feature = declared_names.add_feature(token, decl_line)
 
                     else:
-                        feature = len(oov_name_token2index) + self.nr_of_names_to_keep + self.vocabulary.offsets['NAME']
-                        oov_name_token2index[token] = feature
+                        feature = declared_names.get_feature(token, decl_line)
+
+                    #     feature = len(oov_name_token2index) + self.nr_of_names_to_keep + self.vocabulary.offsets['NAME']
+                    #     oov_name_token2index[token + '_' + str(token['index'])] = feature
+
+                    # else:
+                    #     feature = oov_name_token2index[token + '_' + str(token['index'])]
+
+
+
+                    # elif token in oov_name_token2index:
+                    #     feature = oov_name_token2index[token]
+
+                    # else:
+                    #     feature = len(oov_name_token2index) + self.nr_of_names_to_keep + self.vocabulary.offsets['NAME']
+                    #     oov_name_token2index[token] = feature
 
                     # name_id = self.vocabulary.token2index['NAME'][node[key]]
                     # if name_id < self.nr_of_names_to_keep:
@@ -191,15 +215,25 @@ class AstDataset(IterableDataset):
 
                     vocab = 'NAME'
 
+                    # if not 'REF' in parent[key]:
+
                 else:
                     feature = self.vocabulary.token2index['NON_RES'][node[key]]
                     vocab = 'NON_RES'
 
 
-            if vocab == 'NAME' and token in oov_name_token2index:
+            if vocab == 'NAME' and declared_names.is_declared(node[key]):
                 feature_combined = feature
             else:
                 feature_combined = self.vocabulary.token2index['ALL'][node[key]]
+
+            # if 'DECL' in node[key] and 'DECLARATOR' != node[key] and 'DECL_STMT' != parent[key]:
+                # names = self._find_names_decl(node, key)
+                # if node[key] not in ['DECL_STMT', 'FUNCTION_DECL', 'VAR_DECL']:
+                # print(parent[key], node['index'], names)
+                # self._find_names_decl(node, key)
+
+
         else:
             feature = node[key]
             vocab = ''
@@ -207,15 +241,40 @@ class AstDataset(IterableDataset):
         features = [[torch.tensor([feature])]]
         features_combined = [[torch.tensor([feature_combined])]]
         vocabs = [vocab]
+
         if 'children' in node:
-            for child in node['children']:
-                feature, feature_combined, vocab, oov_name_token2index = self._gather_node_attributes(
-                    child, key, node, oov_name_token2index)
+            for idx, child in enumerate(node['children']):
+                feature, feature_combined, vocab, declared_names = self._gather_node_attributes(
+                    child, key, node, declared_names)
                 features.extend(feature)
                 features_combined.extend(feature_combined)
                 vocabs += vocab
 
-        return features, features_combined, vocabs, oov_name_token2index
+        return features, features_combined, vocabs, declared_names
+
+
+    def _find_names_decl(self, node, key):
+        names = []
+
+        if 'children' in node:
+            for child in node['children']:
+                if not child['res']\
+                   and not 'LITERAL' in node[key]\
+                   and 'TYPE' != node[key]\
+                   and 'REF_BUILTIN' != node[key]\
+                   and 'PARM_DECL' != child[key]\
+                   and 'REF' not in node[key]:
+                    names.append(child[key])
+                    return names
+
+                if 'COMPOUND_STMT' != child[key]:
+                    names.extend(self._find_names_decl(child, key))
+
+
+        return names
+
+
+
 
     def _gather_adjacency_list(self, node):
         adjacency_list = []
@@ -241,10 +300,12 @@ class AstDataset(IterableDataset):
     def convert_tree_to_tensors(self, tree):
         # Label each node with its walk order to match nodes to feature tensor indexes
         # This modifies the original tree as a side effect
-        self._label_node_index(tree)
+        amt_nodes = self._label_node_index(tree)
 
-        features, features_combined, vocabs, oov_name_token2index = self._gather_node_attributes(
-            tree, 'token')
+        declared_names = [[] for _ in range(amt_nodes)]
+
+        features, features_combined, vocabs, declared_names = self._gather_node_attributes(
+            tree, 'token', declared_names)
         adjacency_list = self._gather_adjacency_list(tree)
         adjacency_list_sib = self._gather_adjacency_list_sib(tree)
 
@@ -264,7 +325,7 @@ class AstDataset(IterableDataset):
             'edge_order_topdown': torch.tensor(edge_order_topdown, dtype=torch.int32),
             'edge_order_topdown_sib': torch.tensor(edge_order_topdown_sib, dtype=torch.int32),
             'vocabs': vocabs,
-            'oov_name_token2index': oov_name_token2index
+            'declared_names': declared_names
         }
 
 
@@ -283,3 +344,45 @@ class Bz2CsvLineReader():
         with bz2.BZ2File(self.filename, "r") as file:
             for i, row in enumerate(csv.reader(self._line_reader(file))):
                 yield row
+
+
+class DeclaredNames():
+    def __init__(self, idx_offset):
+        self.names = {}
+        self.idx_offset = idx_offset
+
+    def add_feature(self, name, line=None):
+        if self.is_declared(name, line):
+            return self.get_feature(name, line)
+        else:
+            if line:
+                key = f'{name}_{line}'
+            else:
+                key = name
+
+            self.names[key] = len(self.names) + self.idx_offset
+
+            return self.names[key]
+
+    def get_feature(self, name, line=None):
+        if line:
+            key = f'{name}_{line}'
+            if key in self.names:
+                return self.names[key]
+            else:
+                return self.names[name]
+
+        else:
+            name_idx = ['_'.join(k.split('_')[:-1]) for k in self.names.keys()].index(name)
+            key = list(self.names.keys())[name_idx]
+
+            return self.names[key]
+
+    def is_declared(self, name, line=None):
+        if line:
+            return f'{name}_{line}' in self.names.keys()
+        else:
+            return name in ['_'.join(k.split('_')[:-1]) for k in self.names.keys()]
+
+
+

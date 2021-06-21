@@ -44,7 +44,7 @@ def calculate_evaluation_orders_topdown(adj_list, adj_list_sib, tree_size):
         # Mark nodes that have not yet been evaluated
         # and which are not in the list of children with unevaluated child nodes
         nodes_to_evaluate = unevaluated_nodes & ~np.isin(node_ids, unready_children) & ~np.isin(node_ids, unready_next_sib)
-        # print(tree_size, unevaluated_mask, unready_children, nodes_to_evaluate)
+
         # Set the node order
         node_order[nodes_to_evaluate] = n
         unevaluated_nodes[nodes_to_evaluate] = False
@@ -140,7 +140,7 @@ def batch_tree_input(batch):
     batched_edge_order_topdown = torch.cat([b['edge_order_topdown'] for b in batch])
     batched_edge_order_topdown_sib = torch.cat([b['edge_order_topdown_sib'] for b in batch])
     batched_vocabs = np.concatenate([b['vocabs'] for b in batch])
-    batched_oov_name_token2index = [b['oov_name_token2index'] for b in batch]
+    batched_declared_names = [b['declared_names'] for b in batch]
 
     batched_adjacency_list = []
     batched_adjacency_list_sib = []
@@ -151,6 +151,8 @@ def batch_tree_input(batch):
         offset += n
     batched_adjacency_list = torch.cat(batched_adjacency_list)
     batched_adjacency_list_sib = torch.cat(batched_adjacency_list_sib)
+
+    tree_indices = torch.cat([torch.full((tree_sizes[idx],), fill_value=idx) for idx in range(len(batch))])
 
     return {
         'features': batched_features,
@@ -164,5 +166,6 @@ def batch_tree_input(batch):
         'adjacency_list_sib': batched_adjacency_list_sib,
         'tree_sizes': tree_sizes,
         'vocabs': batched_vocabs,
-        'oov_name_token2index': batched_oov_name_token2index
+        'tree_indices': tree_indices,
+        'declared_names': batched_declared_names
     }

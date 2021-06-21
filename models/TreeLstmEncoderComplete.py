@@ -16,6 +16,7 @@ class TreeLstmEncoderComplete(nn.Module):
                 use_cell_output_lstm, 
                 vae,
                 num_rnn_layers_enc,
+                recurrent_dropout,
                 indiv_embed_layers):
 
         super().__init__() 
@@ -33,6 +34,8 @@ class TreeLstmEncoderComplete(nn.Module):
         self.tree_lstms = nn.ModuleList([])
         self.leaf_lstms = nn.ModuleDict({})
         self.attention = LstmAttention(rnn_hidden_size)
+
+        self.recurrent_dropout = nn.Dropout(recurrent_dropout)
 
         for i in range(num_rnn_layers_enc):
             if i == 0:
@@ -82,6 +85,9 @@ class TreeLstmEncoderComplete(nn.Module):
                                         edge_order,
                                         h[i],
                                         c[i])
+
+            if i < self.num_rnn_layers_enc - 1:
+                hidden = self.recurrent_dropout(hidden)
 
             features = hidden
         
