@@ -114,6 +114,7 @@ class TreeLstmEncoderComplete(nn.Module):
 
         for idx, tree_state in enumerate(torch.split(hidden, inp['tree_sizes'])):
             hidden_roots[idx] = torch.max(tree_state, dim=0)[0]
+            # hidden_roots[idx] = tree_state[-1]
 
         # Get z_mean and z_log_var from hidden (parent roots only)
         z_mean = self.z_mean(hidden_roots)

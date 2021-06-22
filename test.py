@@ -32,7 +32,7 @@ while True:
 
 @ex.config
 def set_config():
-    pretrained_model = 'checkpoints/546/iter30.tar'
+    pretrained_model = 'checkpoints/599/iter7000.tar'
 
     folder = os.path.dirname(pretrained_model)
     
@@ -42,7 +42,7 @@ def set_config():
 
 
     # Overwrite config pretrained model
-    ex.add_config({'pretrained_model': 'checkpoints/546/iter30.tar'})
+    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 1})
 
 
 class Tester:

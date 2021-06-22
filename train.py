@@ -92,13 +92,11 @@ class Trainer:
     @ex.capture
     def get_datasets(self, dataset_paths, max_tree_size, max_name_tokens, batch_size):
         train_dataset = AstDataset(dataset_paths['TRAIN'], self.vocabulary, max_tree_size, max_name_tokens)
-        train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=batch_size)
+        train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=5000)
 
         val_dataset = AstDataset(dataset_paths['VAL'], self.vocabulary, max_tree_size, max_name_tokens)
-        val_dataset = BufferedShuffleDataset(val_dataset, buffer_size=batch_size)
 
         test_dataset = AstDataset(dataset_paths['TEST'], self.vocabulary, max_tree_size, max_name_tokens)
-        test_dataset = BufferedShuffleDataset(test_dataset, buffer_size=batch_size)
 
         return train_dataset, val_dataset, test_dataset
 

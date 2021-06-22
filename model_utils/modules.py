@@ -91,11 +91,9 @@ class LstmAttention(nn.Module):
 
         a = self.softmax(u)
 
-        # v = torch.sum(a * inp, dim=-1)
+        v = torch.sum(a * inp, dim=-1)
 
-        # print(u.shape, a.shape, v.shape, (a * inp))
-
-        return a * inp
+        return u * inp
 
 
 class MultiLayerLSTMCell(nn.Module):

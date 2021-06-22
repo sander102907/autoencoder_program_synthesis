@@ -18,10 +18,10 @@ def get_config():
 
     # Standard model parameters
     num_epochs = 100
-    batch_size = 32
-    learning_rate = 1e-4   
-    num_rnn_layers_enc = 2  # The number of RNN layers for the encoder (>1 gives stacked RNN)
-    num_rnn_layers_dec = 2  # The number of RNN layers for the decoder (>1 gives stacked RNN)
+    batch_size = 24
+    learning_rate = 1e-3   
+    num_rnn_layers_enc = 3  # The number of RNN layers for the encoder (>1 gives stacked RNN)
+    num_rnn_layers_dec = 3  # The number of RNN layers for the decoder (>1 gives stacked RNN)
     rnn_hidden_size = 300   # The hidden size of the RNN
     latent_dim = 150        # The latent vector size
     embedding_dim = 50      # The embedding dimension (if pretrained embedding is set, will automatically take that size)
@@ -59,8 +59,8 @@ def get_config():
 
 
     # Early stopping parameters
-    check_early_stop_every = 1000                # Update early stop loss every X batches
-    early_stop_patience = 5                     # how many steps to wait before stopping when loss is not improving
+    check_early_stop_every = 3000                # Update early stop loss every X batches
+    early_stop_patience = 3                     # how many steps to wait before stopping when loss is not improving
     early_stop_min_delta = 0                    # minimum difference between new loss and old loss for new loss to be considered as an improvement
 
 
@@ -70,25 +70,25 @@ def get_config():
 
     # Data path parameters
     tokens_paths = {
-        # 'NAME': '../data/ast_trees_full_10-06-2021_2/name_tokens/',
-        # 'NAME_BUILTIN': '../data/ast_trees_full_10-06-2021_2/name_builtin_tokens/',
-        # 'RES': '../data/ast_trees_full_10-06-2021_2/reserved_tokens/',
-        # 'TYPE': '../data/ast_trees_full_10-06-2021_2/type_tokens/',
-        # 'LITERAL': '../data/ast_trees_full_10-06-2021_2/literal_tokens/',
-        'NAME': '../data/ast_trees/name_tokens/',
-        'NAME_BUILTIN': '../data/ast_trees/name_builtin_tokens/',
-        'RES': '../data/ast_trees/reserved_tokens/',
-        'TYPE': '../data/ast_trees/type_tokens/',
-        'LITERAL': '../data/ast_trees/literal_tokens/',
+        'NAME': '../data/ast_trees_interm_19-06-2021/name_tokens/',
+        'NAME_BUILTIN': '../data/ast_trees_interm_19-06-2021/name_builtin_tokens/',
+        'RES': '../data/ast_trees_interm_19-06-2021/reserved_tokens/',
+        'TYPE': '../data/ast_trees_interm_19-06-2021/type_tokens/',
+        'LITERAL': '../data/ast_trees_interm_19-06-2021/literal_tokens/',
+        # 'NAME': '../data/ast_trees/name_tokens/',
+        # 'NAME_BUILTIN': '../data/ast_trees/name_builtin_tokens/',
+        # 'RES': '../data/ast_trees/reserved_tokens/',
+        # 'TYPE': '../data/ast_trees/type_tokens/',
+        # 'LITERAL': '../data/ast_trees/literal_tokens/',
     }
 
     dataset_paths = {
-        # 'TRAIN': '../data/ast_trees_full_10-06-2021_2/asts_train/',
-        # 'VAL': '../data/ast_trees_full_10-06-2021_2/asts_val/',
-        # 'TEST': '../data/ast_trees_full_10-06-2021_2/asts_test/'
-        'TRAIN': '../data/ast_trees/asts_train/',
-        'VAL': '../data/ast_trees/asts_val/',
-        'TEST': '../data/ast_trees/asts_test/'  
+        'TRAIN': '../data/ast_trees_interm_19-06-2021/asts_train/',
+        'VAL': '../data/ast_trees_interm_19-06-2021/asts_val/',
+        'TEST': '../data/ast_trees_interm_19-06-2021/asts_test/'
+        # 'TRAIN': '../data/ast_trees/asts_train/',
+        # 'VAL': '../data/ast_trees/asts_val/',
+        # 'TEST': '../data/ast_trees/asts_test/'  
     } 
 
 

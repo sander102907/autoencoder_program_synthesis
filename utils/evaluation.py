@@ -92,7 +92,9 @@ class Evaluator:
                                    and node.parent.parent.token == self.vocabulary.token2index['RES']['FUNCTION_DECL']
                                    and node.parent.parent.children[-1].token == self.vocabulary.token2index['RES']['COMPOUND_STMT'])
 
-        func_decl_names[0].token = 'main'
+
+        if len(func_decl_names) > 0:
+            func_decl_names[0].token = 'main'
 
 
     def _calc_rand_score(self):

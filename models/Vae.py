@@ -226,6 +226,9 @@ class Vae(nn.Module):
                 if save_folder is not None:
                     evaluator.reconstructions_to_file(reconstructions, save_folder)
 
+                if iterations > 100:
+                    break
+
 
         # Get the average of the bleu scores over the entire test dataset
         for key in avg_tree_bleu_scores.keys():
@@ -249,7 +252,7 @@ class Vae(nn.Module):
                 batch[key] = batch[key].to(self.device)
 
         z, _ = self.encoder(batch)
-        reconstructions += self.decoder(z, target=None, oov_name_token2index=batch['declared_names'])
+        reconstructions += self.decoder(z, target=None, names_token2index=batch['declared_names'])
 
         return reconstructions
 
@@ -280,7 +283,7 @@ class Vae(nn.Module):
         scores = {}
 
         # Get correct formats
-        pred_features = [[self.retrieve_features_tree_dfs(tree, data['oov_name_token2index'][index])] for index, tree in enumerate(trees)]
+        pred_features = [[self.retrieve_features_tree_dfs(tree, data['declared_names'][index].names)] for index, tree in enumerate(trees)]
         true_features = [f.view(-1).tolist() for f in torch.split(data['features'], data['tree_sizes'])]
 
         # Compute blue scores
