@@ -6,6 +6,9 @@ from anytree.exporter import JsonExporter
 from cpp_ast_parser.AST_to_code import AstToCodeParser
 from cpp_ast_parser.utils import add_includes_usings
 import os
+import subprocess
+from threading import Timer
+from tqdm import tqdm
 
 
 class Evaluator:
@@ -54,11 +57,44 @@ class Evaluator:
             'bleu_4': self.bleu_4
         }
 
+    def calc_perc_compiles(self, folder, fix_errors=True):
+        code_folder = os.path.join('output', folder, 'code')
+        compile_folder = os.path.join('output', folder, 'compiled')
+        os.makedirs(compile_folder, exist_ok=True)
+
+        amt_compiles = 0
+
+        for file in tqdm(os.listdir(code_folder)):
+            program_file_path = os.path.join(code_folder, file)
+            compiled_file_path = os.path.join(compile_folder, f'{file.replace(".cpp", "")}.out')
+            
+            if fix_errors:
+                proc_fix = subprocess.Popen(['clang-tidy', program_file_path, '-fix-errors'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                # timeout after 2 seconds
+                t = Timer(2, proc_fix.kill)
+                t.start()
+                proc_fix.wait()
+
+            proc_compile = subprocess.Popen(['g++', program_file_path, '-o', compiled_file_path, '-std=c++17'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # timeout after 2 seconds
+            t = Timer(2, proc_compile.kill)
+            t.start()
+            proc_compile.wait()
+
+            compiles = os.path.isfile(compiled_file_path)
+
+            amt_compiles += compiles
+
+        return amt_compiles / len(os.listdir(code_folder))
+
+
 
     def reconstructions_to_file(self, reconstructions, folder):
+        code_folder = os.path.join('output', folder, 'code')
+        os.makedirs(code_folder, exist_ok=True)
+
         parser = AstToCodeParser('output/')
         parser.load_vocabs_from_dicts(self.vocabulary.token2index)
-        os.makedirs(os.path.join('output', folder), exist_ok=True)
 
         imports = ['using namespace std;', '#include <vector>', '#include <iostream>', '#include <string>',
                   '#include <cstring>', '#include <queue>', '#include <stdio.h>', '#include <math.h>', '#include <map>']
@@ -67,7 +103,7 @@ class Evaluator:
 
         for idx, tree in enumerate(reconstructions):
             self._add_main_to_reconstruction(tree)
-            program_path = os.path.join('output', folder, f'{idx}.cpp')
+            program_path = os.path.join(code_folder, f'{idx}.cpp')
             with open(program_path, 'w') as f:
                 try:
                     for child in tree.children:
@@ -75,8 +111,8 @@ class Evaluator:
                 except Exception as e:
                     pass
 
-            with open(program_path.replace('cpp', 'json'), 'w') as f:
-                f.write(exporter.export(tree))
+            # with open(program_path.replace('cpp', 'json'), 'w') as f:
+            #     f.write(exporter.export(tree))
 
             add_includes_usings(program_path, imports)
 

@@ -12,6 +12,10 @@ import sys
 import json
 from model_utils.vocabulary import Vocabulary
 from torch import optim
+from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
+from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
+from model_utils.metrics_helper import MetricsHelperTree2Tree
+
 from config.vae_config import ex
 
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -46,7 +50,14 @@ class Trainer:
 
     @ex.capture
     def make_model(self):
-        model = Vae(device, self.vocabulary, self.loss_weights).to(device)
+        model = Vae(device,
+                    TreeLstmEncoderComplete, 
+                    TreeLstmDecoderComplete, 
+                    self.vocabulary, 
+                    MetricsHelperTree2Tree, 
+                    self.loss_weights
+                    ).to(device)
+                    
         return model
 
     @ex.capture
@@ -92,7 +103,7 @@ class Trainer:
     @ex.capture
     def get_datasets(self, dataset_paths, max_tree_size, max_name_tokens, batch_size):
         train_dataset = AstDataset(dataset_paths['TRAIN'], self.vocabulary, max_tree_size, max_name_tokens)
-        train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=5000)
+        train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=10)
 
         val_dataset = AstDataset(dataset_paths['VAL'], self.vocabulary, max_tree_size, max_name_tokens)
 
@@ -160,20 +171,20 @@ class Trainer:
             
 
         self.model.fit(num_epochs, self.kl_scheduler, self.train_loader, self.val_loader, save_dir)
-        avg_tree_bleu_scores, seq_bleu_scores = self.model.test(self.test_loader, str(_run._id))       
+        avg_tree_bleu_scores, seq_bleu_scores, perc_compiles = self.model.test(self.test_loader, str(_run._id))       
 
-        return avg_tree_bleu_scores, seq_bleu_scores
+        return avg_tree_bleu_scores, seq_bleu_scores, perc_compiles
 
 
 @ex.main
 def main(_run):
     trainer = Trainer()
-    avg_tree_bleu_scores, seq_bleu_scores = trainer.run()
+    avg_tree_bleu_scores, seq_bleu_scores, perc_compiles = trainer.run()
     
     # results = ModelResults()
     # results.from_dict(bleu_scores)
 
-    return {'seq_bleu_scores': seq_bleu_scores, 'avg_tree_bleu_scores': avg_tree_bleu_scores}
+    return {'seq_bleu_scores': seq_bleu_scores, 'avg_tree_bleu_scores': avg_tree_bleu_scores, 'percentage compiles': perc_compiles}
 
 if __name__ == "__main__":
     ex.run_commandline()

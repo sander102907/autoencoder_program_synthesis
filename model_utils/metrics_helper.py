@@ -1,4 +1,4 @@
-class MetricsHelper:
+class MetricsHelperTree2Tree:
     @staticmethod
     def log_to_sacred(train, current_iteration, total_loss, kl_loss, reconstruction_loss, individual_losses,
                       accuracies, kl_weight, vocabs, _run):
@@ -123,3 +123,52 @@ class MetricsHelper:
             model_metrics[f'Literal label accuracy {loss_type}'] = {}
             model_metrics[f'Name builtin label accuracy {loss_type}'] = {}
             model_metrics[f'Name label accuracy {loss_type}'] = {}
+
+
+class MetricsHelperSeq2Seq:
+    @staticmethod
+    def log_to_sacred(train, current_iteration, total_loss, kl_loss, reconstruction_loss, kl_weight, nr_words, _run):
+
+        if train:
+            loss_type = 'train'
+        else:
+            loss_type = 'validation' 
+
+        _run.log_scalar(f'Total loss {loss_type}', total_loss.item(), current_iteration)
+        _run.log_scalar(f'Reconstruction loss {loss_type}', reconstruction_loss.item(), current_iteration)
+        _run.log_scalar(f'KL weight {loss_type}', kl_weight, current_iteration)
+        _run.log_scalar(f'KL loss {loss_type}', kl_loss.item(), current_iteration)
+
+        _run.log_scalar(f'Total loss / word {loss_type}', total_loss.item() / nr_words, current_iteration)
+        _run.log_scalar(f'Reconstruction loss / word {loss_type}', reconstruction_loss.item() / nr_words, current_iteration)
+        _run.log_scalar(f'KL loss  / word {loss_type}', kl_loss.item() / nr_words, current_iteration)
+
+    @staticmethod
+    def update_model_metrics(train, current_iteration, model_metrics, total_loss, kl_loss, reconstruction_loss, kl_weight, nr_words):
+
+        if train:
+            loss_type = 'train'
+        else:
+            loss_type = 'validation' 
+
+        model_metrics[f'Total loss {loss_type}'][current_iteration] = total_loss.item()
+        model_metrics[f'Reconstruction loss {loss_type}'][current_iteration] = reconstruction_loss.item()
+        model_metrics[f'KL weight {loss_type}'][current_iteration] = kl_weight
+        model_metrics[f'KL loss {loss_type}'][current_iteration] = kl_loss.item()
+
+        model_metrics[f'Total loss / word {loss_type}'][current_iteration] = total_loss.item() / nr_words
+        model_metrics[f'Reconstruction loss / word {loss_type}'][current_iteration] = reconstruction_loss.item() / nr_words
+        model_metrics[f'KL loss  / word {loss_type}'][current_iteration] = kl_loss.item() / nr_words
+
+    
+    @staticmethod
+    def init_model_metrics(model_metrics):
+        for loss_type in ['train', 'validation']:
+            model_metrics[f'Total loss {loss_type}'] = {}
+            model_metrics[f'Reconstruction loss {loss_type}'] = {}
+            model_metrics[f'KL weight {loss_type}'] = {}
+            model_metrics[f'KL loss {loss_type}'] = {}
+
+            model_metrics[f'Total loss / word {loss_type}'] = {}
+            model_metrics[f'Reconstruction loss / word {loss_type}'] = {}
+            model_metrics[f'KL loss  / word {loss_type}'] = {}

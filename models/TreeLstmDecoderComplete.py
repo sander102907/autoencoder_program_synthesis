@@ -6,6 +6,7 @@ from utils.TreeNode import Node
 from utils.Sampling import Sampling
 from model_utils.modules import AddGate, PredictiveHidden, TreeTopologyPred, MultiLayerLSTMCell
 from model_utils.distance_functions import CosineDistance
+from model_utils.adaptive_softmax_pytorch import AdaptiveLogSoftmaxWithLoss
 from config.vae_config import ex
 from random import choice
 
@@ -104,7 +105,7 @@ class TreeLstmDecoderComplete(nn.Module):
                 # Adaptive softmax loss does not need prediction layer, much faster approach
                     # for calculating softmax with highly imbalanced vocabs
                     # cutoffs: 10: 71.1%, 11-100: 18.8%, 101-1000: 7.8%, rest: 2.2%
-                    self.label_losses[vocab_name] = nn.AdaptiveLogSoftmaxWithLoss(
+                    self.label_losses[vocab_name] = AdaptiveLogSoftmaxWithLoss(
                                                         self.rnn_hidden_size,
                                                         self.vocabulary.get_vocab_size(vocab_name),
                                                         cutoffs=[10, 100, 300],
@@ -327,6 +328,10 @@ class TreeLstmDecoderComplete(nn.Module):
                         accuracies[k] += sum(self.label_losses[k].predict(h_pred[vocabs[node_mask] == k])
                                             == label[vocabs[node_mask] == k].view(-1)).item()
 
+
+                        # Reduction is set to None for adaptive softmax with logit loss
+                        label_loss = torch.sum(label_loss)
+
                         loss += label_loss
                         individual_losses[k] += label_loss.item()
                     elif k == 'NAME':
@@ -386,8 +391,8 @@ class TreeLstmDecoderComplete(nn.Module):
                                                                     ), dim=-1) == label[vocabs[node_mask] == k].view(-1)).item()
                         
                         # print(k, h_pred[vocabs[node_mask] == k], parent_state, sibling_state)
-                        pred_labels = torch.argmax(self.softmax(label_pred), dim=-1)
-                        print(iteration, k, pred_labels[pred_labels != label[vocabs[node_mask] == k].view(-1)].tolist(), pred_labels.tolist(), label[vocabs[node_mask] == k].view(-1).tolist()) #, self.softmax(label_pred).topk(3, sorted=True)[1], self.softmax(label_pred).topk(3, sorted=True)[0], h_pred[:, :5],)
+                        # pred_labels = torch.argmax(self.softmax(label_pred), dim=-1)
+                        # print(iteration, k, pred_labels[pred_labels != label[vocabs[node_mask] == k].view(-1)].tolist(), pred_labels.tolist(), label[vocabs[node_mask] == k].view(-1).tolist()) #, self.softmax(label_pred).topk(3, sorted=True)[1], self.softmax(label_pred).topk(3, sorted=True)[0], h_pred[:, :5],)
                         loss += label_loss #* max(-100 * iteration + 200, 1)
 
                         individual_losses[k] += label_loss.item()
@@ -545,11 +550,20 @@ class TreeLstmDecoderComplete(nn.Module):
             p_res = self.sigmoid(res_pred)
 
 
+            # Make sure we do not get infinitely long repeating siblings
+            # So when we get > 8 consecutive siblings, slowly start reducing p_sib
+            for p_sib, sib_path_offset in zip(p_sibling, sibling_path_offsets):
+                if sib_path_offset[-1] > 8:
+                    p_sib *= 1 - ((sib_path_offset[-1] - 8) / 10)
+
+
             # Sample is_parent and has_sibling from predicted probability of parent/sibling
             is_parent = (p_parent >= 0.5).view(-1)
             has_sibling = (p_sibling >= 0.5).view(-1)
             # is_parent = (torch.distributions.bernoulli.Bernoulli(p_parent).sample() == 1).view(-1)
             # has_sibling = (torch.distributions.bernoulli.Bernoulli(p_sibling).sample() == 1).view(-1)
+
+            # print(p_sibling, sibling_path_offsets)
 
             is_res = (p_res >= 0.5).view(-1)
 
@@ -607,9 +621,9 @@ class TreeLstmDecoderComplete(nn.Module):
 
             for idx, name_idx in enumerate(torch.where(name_indices)[0]):
                 # If the parent is not a reference or the number of delcarations is 0
-                if 'REF' not in parent_labels[name_idx] \
-                    or len(list(declared_names[program_ids[name_idx]])) == 0 \
-                    or len(list(declared_names[program_ids[name_idx]])) >= self.vocabulary.get_vocab_size('NAME') - 1:
+                if ('REF' not in parent_labels[name_idx] \
+                    or len(list(declared_names[program_ids[name_idx]])) == 0) \
+                    and len(list(declared_names[program_ids[name_idx]])) < self.vocabulary.get_vocab_size('NAME') - 1:
 
                     name_label = len(declared_names[program_ids[name_idx]])
                     declared_names[program_ids[name_idx]][name_label] = (sibling_path_offsets[name_idx], self.name_weights(h_pred[name_idx]))
@@ -677,7 +691,7 @@ class TreeLstmDecoderComplete(nn.Module):
                         device=self.device
                     )
                 except Exception as e:
-                    print(e, predicted_labels.tolist(), node_types.tolist())
+                    print(e, predicted_labels.tolist(), node_types.tolist(), declared_names[0].keys())
                     return
 
                 emb_labels = self.embedding_layers['ALL'](predicted_labels).view(-1, self.embedding_dim)

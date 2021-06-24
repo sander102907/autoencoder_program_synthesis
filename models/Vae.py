@@ -1,11 +1,9 @@
 import os
 import torch
 import torch.nn as nn
-from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
-from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
 from models.TreeSeqRnnEncoder import TreeSeqRnnEncoder
 from model_utils.embeddings import EmbeddingLoader
-from model_utils.metrics_helper import MetricsHelper
+from model_utils.metrics_helper import MetricsHelperSeq2Seq, MetricsHelperTree2Tree
 from model_utils.earlystopping import EarlyStopping
 from nltk.translate.bleu_score import corpus_bleu
 from utils.TreeNode import Node
@@ -19,7 +17,7 @@ class Vae(nn.Module):
     Can also be used to easily save and load models
     """
 
-    def __init__(self, device, vocabulary, loss_weights):
+    def __init__(self, device, encoder, decoder, vocabulary, metrics_helper, loss_weights):
         super().__init__()
 
         self.vocabulary = vocabulary
@@ -27,12 +25,14 @@ class Vae(nn.Module):
 
         self.create_embedding_layers()
 
-        self.encoder = TreeLstmEncoderComplete(device, self.embedding_layers)
-        self.decoder = TreeLstmDecoderComplete(device, self.embedding_layers, vocabulary, loss_weights)
+        self.encoder = encoder(device, self.embedding_layers)
+        self.decoder = decoder(device, self.embedding_layers, vocabulary, loss_weights)
         # self.encoder = TreeSeqRnnEncoder(device, params, self.embedding_layers).to(device)
 
         # Store losses -> so we can easily save them
         self.metrics = {}
+
+        self.metrics_helper = metrics_helper
 
         self.device = device
 
@@ -87,7 +87,7 @@ class Vae(nn.Module):
         current_iter_train = 0
         current_iter_val = 0
 
-        MetricsHelper.init_model_metrics(self.metrics)
+        self.metrics_helper.init_model_metrics(self.metrics)
 
 
         for epoch in range(epochs):
@@ -119,8 +119,9 @@ class Vae(nn.Module):
             kl_weight = kl_scheduler.get_weight(current_iteration)
 
             for key in batch.keys():
-                if key not in ['tree_sizes', 'vocabs', 'declared_names']:
+                if key not in ['tree_sizes', 'vocabs', 'declared_names', 'length']:
                     batch[key] = batch[key].to(self.device)
+
 
             kl_loss, reconstruction_loss, individual_losses, accuracies = self(batch)
 
@@ -137,10 +138,18 @@ class Vae(nn.Module):
             self.optimizer.step()
             self.optimizer.zero_grad()
 
-            MetricsHelper.log_to_sacred(self.training, current_iteration, loss, kl_loss, reconstruction_loss,
-                                        individual_losses, accuracies, kl_weight, batch['vocabs'], _run)
-            MetricsHelper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
-                                               individual_losses, accuracies, kl_weight, batch['vocabs'])
+
+            if self.metrics_helper == MetricsHelperTree2Tree:
+                self.metrics_helper.log_to_sacred(self.training, current_iteration, loss, kl_loss, reconstruction_loss,
+                                            individual_losses, accuracies, kl_weight, batch['vocabs'], _run)
+                self.metrics_helper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
+                                                individual_losses, accuracies, kl_weight, batch['vocabs'])
+            else:
+                self.metrics_helper.log_to_sacred(self.training, current_iteration, loss, kl_loss, reconstruction_loss,
+                                                  kl_weight, 750, _run)
+                self.metrics_helper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
+                                                         kl_weight, 750)
+
 
             
             # Save model to file every X iterations
@@ -176,19 +185,25 @@ class Vae(nn.Module):
                 current_iteration = iterations_passed + batch_index
 
                 for key in batch.keys():
-                    if key not in ['tree_sizes', 'vocabs', 'declared_names']:
+                    if key not in ['tree_sizes', 'vocabs', 'declared_names', 'length']:
                         batch[key] = batch[key].to(self.device) 
 
                 z, kl_loss = self.encoder(batch)
-                reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch, batch['declared_names'])
+                reconstruction_loss, individual_losses, accuracies = self.decoder(z, batch)
 
                 loss = kl_loss + reconstruction_loss
                 total_loss += loss.item()
 
-                MetricsHelper.log_to_sacred(self.training, current_iteration, loss, kl_loss, reconstruction_loss,
-                                        individual_losses, accuracies, 1, batch['vocabs'], _run)
-                MetricsHelper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
-                                                individual_losses, accuracies, 1, batch['vocabs'])
+                if self.metrics_helper == MetricsHelperTree2Tree:
+                    self.metrics_helper.log_to_sacred(self.training, current_iteration, loss, kl_loss, reconstruction_loss,
+                                                individual_losses, accuracies, 1, batch['vocabs'], _run)
+                    self.metrics_helper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
+                                                    individual_losses, accuracies, 1, batch['vocabs'])
+                else:
+                    self.metrics_helper.log_to_sacred(self.training, current_iteration, loss, kl_loss, reconstruction_loss,
+                                                    1, 750, _run)
+                    self.metrics_helper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
+                                                            1, 750)
 
 
         early_stopping(total_loss)
@@ -223,10 +238,7 @@ class Vae(nn.Module):
                 evaluator.add_eval_hypotheses(batch)
                 evaluator.add_eval_references(new_reconstructions)
 
-                if save_folder is not None:
-                    evaluator.reconstructions_to_file(reconstructions, save_folder)
-
-                if iterations > 100:
+                if iterations > 500:
                     break
 
 
@@ -236,7 +248,10 @@ class Vae(nn.Module):
 
         seq_bleu_scores = evaluator.calc_bleu_score()
 
-        return avg_tree_bleu_scores, seq_bleu_scores
+        evaluator.reconstructions_to_file(reconstructions, save_folder)
+        perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=False)
+
+        return avg_tree_bleu_scores, seq_bleu_scores, perc_compiles
 
 
     def evaluate(self, batch):
@@ -323,15 +338,18 @@ class Vae(nn.Module):
 
     def log_model_stats(self, current_iteration, save_every):
         print('INFO - Model statistics:')
-        print('\t Avg Total loss / node: ', sum(list(self.metrics['Total loss / node train'].values())[current_iteration - save_every: current_iteration])/save_every)
-        print('\t Avg acc parent: ', sum(list(self.metrics['Parent accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
-        print('\t Avg acc sibling: ', sum(list(self.metrics['Sibling accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
-        print('\t Avg acc is reserved: ', sum(list(self.metrics['Is reserved accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
-        print('\t Avg acc reserved label: ', sum(list(self.metrics['Reserved label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
-        print('\t Avg acc is type label: ', sum(list(self.metrics['Type label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
-        print('\t Avg acc literal: ', sum(list(self.metrics['Literal label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
-        print('\t Avg acc name builtin: ', sum(list(self.metrics['Name builtin label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
-        print('\t Avg acc name: ', sum(list(self.metrics['Name label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        if isinstance(self.metrics_helper, MetricsHelperTree2Tree):
+            print('\t Avg Total loss / node: ', sum(list(self.metrics['Total loss / node train'].values())[current_iteration - save_every: current_iteration])/save_every)
+            print('\t Avg acc parent: ', sum(list(self.metrics['Parent accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+            print('\t Avg acc sibling: ', sum(list(self.metrics['Sibling accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+            print('\t Avg acc is reserved: ', sum(list(self.metrics['Is reserved accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+            print('\t Avg acc reserved label: ', sum(list(self.metrics['Reserved label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+            print('\t Avg acc is type label: ', sum(list(self.metrics['Type label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+            print('\t Avg acc literal: ', sum(list(self.metrics['Literal label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+            print('\t Avg acc name builtin: ', sum(list(self.metrics['Name builtin label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+            print('\t Avg acc name: ', sum(list(self.metrics['Name label accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
+        else:
+            print('\t Avg Total loss / word: ', sum(list(self.metrics['Total loss / word train'].values())[current_iteration - save_every: current_iteration])/save_every)
 
 
     

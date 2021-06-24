@@ -1,18 +1,23 @@
 import torch
 import torch.nn as nn
 import torch.nn.utils.rnn as rnn_utils
+from model_utils.adaptive_softmax_pytorch import AdaptiveLogSoftmaxWithLoss
 from utils.Sampling import Sampling
+from config.vae_config import ex
+
 
 class SeqRnnDecoder(nn.Module):
+    @ex.capture
     def __init__(self,
                 device,
-                embedding_layer,
+                embedding_layers,
+                vocabulary,
+                loss_weights,
                 embedding_dim,
                 rnn_hidden_size,
                 latent_dim,
-                num_rnn_layers,
+                num_rnn_layers_dec,
                 recurrent_dropout,
-                vocab_size,
                 bidirectional=False,
                 max_sequence_length=1500):
 
@@ -21,28 +26,46 @@ class SeqRnnDecoder(nn.Module):
         self.device = device
         self.latent_dim = latent_dim
         self.bidirectional = bidirectional
-        self.num_rnn_layers = num_rnn_layers
+        self.num_rnn_layers = num_rnn_layers_dec
         self.rnn_hidden_size = rnn_hidden_size
         self.max_sequence_length = max_sequence_length
+        self.vocab_size = vocabulary.get_vocab_size('ALL')
+        print(self.vocab_size)
 
-        self.embedding_layer = embedding_layer
+        self.embedding_layer = embedding_layers['ALL']
 
         self.rnn = nn.RNN(embedding_dim,
                           rnn_hidden_size,
-                          num_layers=num_rnn_layers, 
+                          num_layers=num_rnn_layers_dec, 
                           bidirectional=bidirectional, 
                           batch_first=True, 
                           dropout=recurrent_dropout)
 
-        self.hidden_factor = (2 if bidirectional else 1) * num_rnn_layers
+        self.hidden_factor = (2 if bidirectional else 1) * num_rnn_layers_dec
 
         self.latent2hidden = nn.Linear(latent_dim, rnn_hidden_size * self.hidden_factor)
-        self.prediction_layer = nn.Linear(rnn_hidden_size * (2 if bidirectional else 1), vocab_size)
-
-        self.loss = nn.CrossEntropyLoss(reduction='sum')
 
 
-    def forward(self, z, inp):
+        # Adaptive softmax loss does not need prediction layer, much faster approach
+        # for calculating softmax with highly imbalanced vocabs
+        # cutoffs: 30: 70.1%, 31-100: 18.0%, 101-1000: 9.3%, rest: 2.6%
+        self.loss = AdaptiveLogSoftmaxWithLoss(
+                                            self.rnn_hidden_size,
+                                            self.vocab_size,
+                                            cutoffs=[30, 100, 1000],
+                                            div_value=4.0)
+
+        self.prediction_layer = nn.Linear(rnn_hidden_size * (2 if bidirectional else 1), self.vocab_size)
+
+        # self.loss = nn.CrossEntropyLoss(reduction='sum')
+
+
+        self.sos_idx = vocabulary.token2index['ALL']['<sos>']
+        self.eos_idx = vocabulary.token2index['ALL']['<eos>']
+        self.pad_idx = vocabulary.token2index['ALL']['<pad>']
+
+
+    def forward(self, z, inp=None):
         if inp is not None:
             return self.forward_train(z, inp)
         else:
@@ -50,8 +73,13 @@ class SeqRnnDecoder(nn.Module):
         
 
     def forward_train(self, z, inp):
-        batch_size = inp.shape[0]
-        sorted_lengths, sorted_idx = None
+        inp_seq = inp['input']
+        target_seq = inp['target']
+        length = inp['length']
+
+        batch_size = inp_seq.shape[0]
+        sorted_lengths, sorted_idx = torch.sort(length, descending=True)
+        inp_seq = inp_seq[sorted_idx]
 
         hidden = self.latent2hidden(z)
 
@@ -61,24 +89,40 @@ class SeqRnnDecoder(nn.Module):
         else:
             hidden = hidden.unsqueeze(0)
 
-        inp_emb = self.embedding_layer(inp)
+        inp_emb = self.embedding_layer(inp_seq)
+
         packed_inp = rnn_utils.pack_padded_sequence(inp_emb, sorted_lengths.data.tolist(), batch_first=True)
 
         outputs, _ = self.rnn(packed_inp, hidden)
 
         # Process RNN outputs
-        padded_outputs = rnn_utils.pad_packed_sequence(outputs, batch_first=True)[0]
-        padded_outputs = padded_outputs.contiguous()
+        padded_outputs = rnn_utils.pad_packed_sequence(outputs, batch_first=True, padding_value=self.pad_idx)[0]
+
         _,reversed_idx = torch.sort(sorted_idx)
         padded_outputs = padded_outputs[reversed_idx]
-        b,s,_ = padded_outputs.size()
+        _,s,_ = padded_outputs.size()
 
 
         # Get predictions
-        logits = self.prediction_layer(padded_outputs.view(-1, padded_outputs.size(2)))
-        loss = self.loss(logits)
+        # logits = self.prediction_layer(padded_outputs.view(-1, padded_outputs.size(2)))
+        # loss = self.loss(logits)
 
-        return loss
+        # cut-off unnessary padding from target and flatten
+        target_seq = target_seq[:, :s].contiguous().view(-1)
+
+        # "flatten" output as well to (B * max_seq_len, hidden_size)
+        padded_outputs = padded_outputs.view(-1, self.rnn_hidden_size)
+
+        _, loss = self.loss(padded_outputs, target_seq)
+
+        # We do not want to punish the model for predicting padding incorrectly
+        # Therefore we set the loss for the paddings to 0
+        loss[target_seq == self.pad_idx] = 0
+
+        # We sum to get equal weights with KL loss
+        loss = torch.sum(loss)
+
+        return loss, {}, {}
 
 
     def forward_inference(self, z):

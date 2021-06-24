@@ -14,9 +14,12 @@ class Vocabulary:
         for name, path in paths.items():
             self.load_token_counts(path, name)
 
+        # self.token_counts['ALL'] = {k:v for k,v in self.token_counts['ALL'].items() if v > 50}
+
         self.create_tokens()
 
-        self.create_combined_vocabs()
+        if not 'ALL' in paths.keys():
+            self.create_combined_vocabs()
         
 
     def load_token_counts(self, path, name):
@@ -30,6 +33,7 @@ class Vocabulary:
         #         self.offsets[name] += min(len(self.token_counts[k]), self.max_tokens[k])
         #     else:
         #         self.offsets[name] += len(self.token_counts[k])
+
 
         # If path is a file
         if os.path.isfile(path):
@@ -98,9 +102,10 @@ class Vocabulary:
         self.token2index[name][token] = index
         self.index2token[name][index] = token
 
-        index_all = len(self.token2index['ALL'])
-        self.token2index['ALL'][token] = index_all
-        self.index2token['ALL'][index_all] = token
+        if name != 'ALL':
+            index_all = len(self.token2index['ALL'])
+            self.token2index['ALL'][token] = index_all
+            self.index2token['ALL'][index_all] = token
 
     def get_tokens(self, name):
         return list(self.token_counts[name].keys())
