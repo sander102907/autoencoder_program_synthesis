@@ -249,7 +249,7 @@ class Vae(nn.Module):
         seq_bleu_scores = evaluator.calc_bleu_score()
 
         evaluator.reconstructions_to_file(reconstructions, save_folder)
-        perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=False)
+        perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=True)
 
         return avg_tree_bleu_scores, seq_bleu_scores, perc_compiles
 

@@ -8,8 +8,9 @@ import torch
 from torch.utils.data import DataLoader, BufferedShuffleDataset
 import sys
 from model_utils.vocabulary import Vocabulary
-from sacred import Experiment
-from sacred.observers import MongoObserver
+from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
+from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
+from model_utils.metrics_helper import MetricsHelperTree2Tree
 from config.vae_config import ex
 
 
@@ -32,7 +33,7 @@ while True:
 
 @ex.config
 def set_config():
-    pretrained_model = 'checkpoints/599/iter7000.tar'
+    pretrained_model = 'checkpoints/cluster_latent300/iter31000.tar'
 
     folder = os.path.dirname(pretrained_model)
     
@@ -56,7 +57,14 @@ class Tester:
 
 
     def make_model(self):
-        model = Vae(device, self.vocabulary, self.loss_weights).to(device)
+        model = Vae(device,
+                    TreeLstmEncoderComplete, 
+                    TreeLstmDecoderComplete, 
+                    self.vocabulary, 
+                    MetricsHelperTree2Tree, 
+                    self.loss_weights
+                    ).to(device)
+                    
         return model
 
 

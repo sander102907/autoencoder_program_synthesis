@@ -1,63 +1,46 @@
+from models.SeqRnnEncoder import SeqRnnEncoder
+from torch.utils import data
 from models.Vae import Vae
-from utils.TreeLstmUtils import batch_tree_input
-from datasets.AstDataset import AstDataset
+from datasets.SeqDataset import SeqDataset
 import utils.KLScheduling as KLScheduling
-from utils.ModelResults import ModelResults
 import os
-import csv
 import torch
 import math
-from torch.utils.data import DataLoader, BufferedShuffleDataset
-import sys
+from torch.utils.data import DataLoader, ConcatDataset
 import json
 from model_utils.vocabulary import Vocabulary
 from torch import optim
-from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
-from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
-from model_utils.metrics_helper import MetricsHelperTree2Tree
-
 from config.vae_config import ex
+from random import sample
+from models.SeqRnnEncoder import SeqRnnEncoder
+from models.SeqRnnDecoder import SeqRnnDecoder
+from model_utils.metrics_helper import MetricsHelperSeq2Seq
 
-torch.multiprocessing.set_sharing_strategy('file_system')
-maxInt = sys.maxsize
 
 # Device configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-while True:
-    # decrease the maxInt value by factor 10
-    # as long as the OverflowError occurs.
-
-    try:
-        csv.field_size_limit(maxInt)
-        break
-    except OverflowError:
-        maxInt = int(maxInt/10)
-
-
 class Trainer:
     def __init__(self):
         self.vocabulary = self.get_vocabulary()
+        self.add_special_vocab_tokens()
         self.loss_weights = self.get_loss_weights()
+        print('making model')
         self.model = self.make_model()
         self.set_optimizer()
         self.load_model()
-        self.kl_scheduler = self.get_kl_scheduler()
+        print('making datasets')
         self.train_dataset, self.val_dataset, self.test_dataset = self.get_datasets()
         self.train_loader, self.val_loader, self.test_loader = self.get_dataloaders()
+        print('getting scheduler')
+        self.kl_scheduler = self.get_kl_scheduler()
+
 
 
     @ex.capture
     def make_model(self):
-        model = Vae(device,
-                    TreeLstmEncoderComplete, 
-                    TreeLstmDecoderComplete, 
-                    self.vocabulary, 
-                    MetricsHelperTree2Tree, 
-                    self.loss_weights
-                    ).to(device)
-                    
+        model = Vae(device, SeqRnnEncoder, SeqRnnDecoder, self.vocabulary, MetricsHelperSeq2Seq, self.loss_weights).to(device)
         return model
 
     @ex.capture
@@ -73,13 +56,9 @@ class Trainer:
 
 
     @ex.capture
-    def get_vocabulary(self, tokens_paths, max_name_tokens, reusable_name_tokens):
+    def get_vocabulary(self, tokens_paths):
         max_tokens = {
-            'RES': None,
-            'NAME': max_name_tokens + reusable_name_tokens,
-            'TYPE': None,
-            'LITERAL': None,
-            'NAME_BUILTIN': None,
+            'ALL': None
         }
 
         vocabulary = Vocabulary(tokens_paths, max_tokens)
@@ -101,15 +80,35 @@ class Trainer:
 
 
     @ex.capture
-    def get_datasets(self, dataset_paths, max_tree_size, max_name_tokens, batch_size):
-        train_dataset = AstDataset(dataset_paths['TRAIN'], self.vocabulary, max_tree_size, max_name_tokens)
-        train_dataset = BufferedShuffleDataset(train_dataset, buffer_size=5000)
+    def get_datasets(self, dataset_paths, max_program_size):
+        files = set(os.path.join(dataset_paths['ALL'], file) for file in os.listdir(dataset_paths['ALL']) if 'programs' in file)
 
-        val_dataset = AstDataset(dataset_paths['VAL'], self.vocabulary, max_tree_size, max_name_tokens)
+        train_files, val_files, test_files = self.create_train_val_test_split(files)
 
-        test_dataset = AstDataset(dataset_paths['TEST'], self.vocabulary, max_tree_size, max_name_tokens)
+        train_datasets = list(map(lambda x : SeqDataset(x, self.vocabulary, max_program_size, device), train_files))
+        train_dataset = ConcatDataset(train_datasets)
+
+        val_datasets = list(map(lambda x : SeqDataset(x, self.vocabulary, max_program_size, device), val_files))
+        val_dataset = ConcatDataset(val_datasets)
+
+        test_datasets = list(map(lambda x : SeqDataset(x, self.vocabulary, max_program_size, device), test_files))
+        test_dataset = ConcatDataset(test_datasets)
+
+        self.num_train_programs = sum([len(dset) for dset in train_datasets])
 
         return train_dataset, val_dataset, test_dataset
+
+
+    def create_train_val_test_split(self, files, val_test_files=2):
+        test_files = sample(files, val_test_files)
+        
+        files = files - set(test_files)
+
+        val_files = sample(files, val_test_files)
+
+        train_files = files - set(val_files)
+
+        return train_files, val_files, test_files
 
 
     @ex.capture
@@ -117,19 +116,17 @@ class Trainer:
         train_loader = DataLoader(
             self.train_dataset,
             batch_size=batch_size,
-            collate_fn=batch_tree_input,
+            shuffle=True,
             num_workers=num_workers)
 
         val_loader = DataLoader(
             self.val_dataset,
             batch_size=batch_size,
-            collate_fn=batch_tree_input,
             num_workers=num_workers)
 
         test_loader = DataLoader(
             self.test_dataset,
             batch_size=batch_size,
-            collate_fn=batch_tree_input,
             num_workers=num_workers)
 
         
@@ -144,12 +141,20 @@ class Trainer:
             return KLScheduling.ConstantAnnealing(kl_warmup_iters, kl_weight)
 
         elif kl_scheduling == 'monotonic':
-            iterations = math.ceil((self.vocabulary.token_counts['RES']['root'] / batch_size) * num_epochs)
+            iterations = math.ceil((self.num_train_programs / batch_size) * num_epochs)
             return KLScheduling.MonotonicAnnealing(iterations, kl_warmup_iters, kl_ratio, kl_function)
 
         elif kl_scheduling == 'cyclical':
-            iterations = math.ceil((self.vocabulary.token_counts['RES']['root'] / batch_size) * num_epochs)
+            iterations = math.ceil((self.num_train_programs / batch_size) * num_epochs)
             return KLScheduling.CyclicalAnnealing(iterations, kl_warmup_iters, kl_cycles, kl_ratio, kl_function)
+
+
+    def add_special_vocab_tokens(self):
+        self.vocabulary.add_new_token('ALL', '<pad>')
+        self.vocabulary.add_new_token('ALL', '<unk>')
+        self.vocabulary.add_new_token('ALL', '<sos>')
+        self.vocabulary.add_new_token('ALL', '<eos>')
+
 
 
 
@@ -171,20 +176,17 @@ class Trainer:
             
 
         self.model.fit(num_epochs, self.kl_scheduler, self.train_loader, self.val_loader, save_dir)
-        avg_tree_bleu_scores, seq_bleu_scores, perc_compiles = self.model.test(self.test_loader, str(_run._id))       
+        bleu_scores, perc_compiles = self.model.test(self.test_loader, str(_run._id))       
 
-        return avg_tree_bleu_scores, seq_bleu_scores, perc_compiles
+        return bleu_scores, perc_compiles
 
 
 @ex.main
 def main(_run):
     trainer = Trainer()
-    avg_tree_bleu_scores, seq_bleu_scores, perc_compiles = trainer.run()
-    
-    # results = ModelResults()
-    # results.from_dict(bleu_scores)
+    bleu_scores, perc_compiles = trainer.run()
 
-    return {'seq_bleu_scores': seq_bleu_scores, 'avg_tree_bleu_scores': avg_tree_bleu_scores, 'percentage compiles': perc_compiles}
+    return {'bleu scores': bleu_scores, 'percentage compiles': perc_compiles}
 
 if __name__ == "__main__":
     ex.run_commandline()
