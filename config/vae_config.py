@@ -44,7 +44,7 @@ def get_config():
     max_program_size = 750          # Cut off last part of programs > max program size and pad the other programs to max program size
 
     # Advanced model parameters
-    pretrained_emb = None #'glove-wiki-gigaword-50'   # Pretrained embedding to use (https://github.com/RaRe-Technologies/gensim-data/blob/master/list.json)
+    pretrained_emb = 'glove-wiki-gigaword-50'   # Pretrained embedding to use (https://github.com/RaRe-Technologies/gensim-data/blob/master/list.json)
     vae = True                                  # Turning this off will revert to standard AE architecture
     use_cell_output_lstm = False                # In case of LSTM RNN, use also the cell state concatenated with the hidden state as output
     indiv_embed_layers = False                  # Use individual embedding layers for each vocab/node type
@@ -58,7 +58,7 @@ def get_config():
     kl_weight = 1                               # For constant annealing: the KL weight
     kl_ratio = 0.2                              # Ratio of total data/data in cycle used to increase kl weight to 1
     kl_function = 'linear'                      # kl scheduler increase function: linear, sinusoidal
-    kl_cycles = 4                               # For cyclical kl scheduler, how many cycles to anneal
+    kl_cycles = 8                               # For cyclical kl scheduler, how many cycles to anneal
 
 
     # Early stopping parameters
@@ -73,11 +73,11 @@ def get_config():
 
     # Data path parameters
     tokens_paths = {
-        'NAME': '../data/ast_trees_interm_19-06-2021/name_tokens/',
-        'NAME_BUILTIN': '../data/ast_trees_interm_19-06-2021/name_builtin_tokens/',
-        'RES': '../data/ast_trees_interm_19-06-2021/reserved_tokens/',
-        'TYPE': '../data/ast_trees_interm_19-06-2021/type_tokens/',
-        'LITERAL': '../data/ast_trees_interm_19-06-2021/literal_tokens/',
+        'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
+        'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
+        'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
+        'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
+        'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
 
 
         # For the seq2seq model
@@ -85,9 +85,9 @@ def get_config():
     }
 
     dataset_paths = {
-        'TRAIN': '../data/ast_trees_interm_19-06-2021/asts_train/',
-        'VAL': '../data/ast_trees_interm_19-06-2021/asts_val/',
-        'TEST': '../data/ast_trees_interm_19-06-2021/asts_test/'
+        'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
+        'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
+        'TEST': '../data/ast_trees_full_19-06-2021/asts_test/'
 
 
         # For the seq2seq model

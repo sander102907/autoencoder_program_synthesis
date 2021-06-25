@@ -61,9 +61,9 @@ class AstDataset(IterableDataset):
 
                 for ast in file_iterator:
                     if self.get_statistics_only:
-                        nodes, depths = self.get_statistics(ast)
-                        if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
-                            yield nodes, depths, ast
+                        nodes, depths, ast_id = self.get_statistics(ast)
+                        if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and depths > 0:
+                            yield nodes, depths, ast_id
                     else:
                         tree, nodes = self.preprocess(ast)
                         if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
@@ -87,9 +87,9 @@ class AstDataset(IterableDataset):
                     # This is not optimal but certainly a speed up compared to just using 1 worker for each file
                     if worker_id - (file_index * workers_per_shared_file) == i % workers_per_shared_file:
                         if self.get_statistics_only:
-                            nodes, depths = self.get_statistics(ast)
-                            if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
-                                yield nodes, depths, ast
+                            nodes, depths, ast_id = self.get_statistics(ast)
+                            if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and depths > 0:
+                                yield nodes, depths, ast_id
                         else:
                             tree, nodes = self.preprocess(ast)
                             if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
@@ -120,7 +120,7 @@ class AstDataset(IterableDataset):
         nodes = self.get_amt_nodes(tree)
         depths = self.get_max_depth(tree)
 
-        return nodes, depths
+        return nodes, depths, ast[0]
 
     def get_amt_nodes(self, root, nodes=0):
         if 'children' in root:

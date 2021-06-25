@@ -81,9 +81,13 @@ class Trainer:
 
     @ex.capture
     def get_datasets(self, dataset_paths, max_program_size):
-        files = set(os.path.join(dataset_paths['ALL'], file) for file in os.listdir(dataset_paths['ALL']) if 'programs' in file)
+        # files = set(os.path.join(dataset_path, file) for file in os.listdir(dataset_path) if 'programs' in file)
 
-        train_files, val_files, test_files = self.create_train_val_test_split(files)
+        # train_files, val_files, test_files = self.create_train_val_test_split(files)
+
+        train_files = [os.path.join(dataset_paths['TRAIN'], file) for file in os.listdir(dataset_paths['TRAIN'])]
+        val_files = [os.path.join(dataset_paths['VAL'], file) for file in os.listdir(dataset_paths['VAL'])]
+        test_files = [os.path.join(dataset_paths['TEST'], file) for file in os.listdir(dataset_paths['TEST'])]
 
         train_datasets = list(map(lambda x : SeqDataset(x, self.vocabulary, max_program_size, device), train_files))
         train_dataset = ConcatDataset(train_datasets)
@@ -99,7 +103,7 @@ class Trainer:
         return train_dataset, val_dataset, test_dataset
 
 
-    def create_train_val_test_split(self, files, val_test_files=2):
+    def create_train_val_test_split(self, files, val_test_files=13):
         test_files = sample(files, val_test_files)
         
         files = files - set(test_files)

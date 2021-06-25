@@ -338,7 +338,7 @@ class Vae(nn.Module):
 
     def log_model_stats(self, current_iteration, save_every):
         print('INFO - Model statistics:')
-        if isinstance(self.metrics_helper, MetricsHelperTree2Tree):
+        if self.metrics_helper == MetricsHelperTree2Tree:
             print('\t Avg Total loss / node: ', sum(list(self.metrics['Total loss / node train'].values())[current_iteration - save_every: current_iteration])/save_every)
             print('\t Avg acc parent: ', sum(list(self.metrics['Parent accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
             print('\t Avg acc sibling: ', sum(list(self.metrics['Sibling accuracy train'].values())[current_iteration - save_every: current_iteration])/save_every)
