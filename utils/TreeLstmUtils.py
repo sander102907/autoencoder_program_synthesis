@@ -129,6 +129,9 @@ def batch_tree_input(batch):
     batch - list of dicts with keys ('features', 'node_order_bottomup', 'node_order_topdown', 'edge_order_bottomup', 'edge_order_topdown', 'adjacency_list')
     returns a dict with keys ('features', 'node_order_bottomup', 'node_order_topdown', 'edge_order_bottomup', 'edge_order_topdown', 'adjacency_list', 'tree_sizes')
     """
+
+    ids = [b[1] for b in batch]
+    batch = [b[0] for b in batch]
     
     tree_sizes = [b['features'].shape[0] for b in batch]
 
@@ -155,6 +158,7 @@ def batch_tree_input(batch):
     tree_indices = torch.cat([torch.full((tree_sizes[idx],), fill_value=idx) for idx in range(len(batch))])
 
     return {
+        'ids': ids,
         'features': batched_features,
         'features_combined': batched_features_combined,
         'node_order_bottomup': batched_node_order_bottomup,

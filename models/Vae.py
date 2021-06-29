@@ -7,7 +7,7 @@ from model_utils.metrics_helper import MetricsHelperSeq2Seq, MetricsHelperTree2T
 from model_utils.earlystopping import EarlyStopping
 from nltk.translate.bleu_score import corpus_bleu
 from utils.TreeNode import Node
-from utils.evaluation import Evaluator
+from utils.evaluation import Seq2SeqEvaluator, Tree2TreeEvaluator
 from config.vae_config import ex
     
 
@@ -93,9 +93,9 @@ class Vae(nn.Module):
         for epoch in range(epochs):
             print('INFO - Starting on epoch: ', epoch)
             # Fit one epoch of training
-            current_iter_train, current_iter_val = self._fit_epoch(train_loader, val_loader, kl_scheduler, current_iter_train,
-                                                       current_iter_val, clip_grad_norm, clip_grad_val, check_early_stop_every,
-                                                       early_stopping, save_every, save_dir, _run)
+            # current_iter_train, current_iter_val = self._fit_epoch(train_loader, val_loader, kl_scheduler, current_iter_train,
+            #                                            current_iter_val, clip_grad_norm, clip_grad_val, check_early_stop_every,
+            #                                            early_stopping, save_every, save_dir, _run)
 
             # Validate one epoch
             current_iter_val = self._val_epoch(val_loader, current_iter_val, early_stopping, _run)
@@ -119,7 +119,7 @@ class Vae(nn.Module):
             kl_weight = kl_scheduler.get_weight(current_iteration)
 
             for key in batch.keys():
-                if key not in ['tree_sizes', 'vocabs', 'declared_names', 'length']:
+                if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length']:
                     batch[key] = batch[key].to(self.device)
 
 
@@ -185,7 +185,7 @@ class Vae(nn.Module):
                 current_iteration = iterations_passed + batch_index
 
                 for key in batch.keys():
-                    if key not in ['tree_sizes', 'vocabs', 'declared_names', 'length']:
+                    if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length']:
                         batch[key] = batch[key].to(self.device) 
 
                 z, kl_loss = self.encoder(batch)
@@ -212,46 +212,50 @@ class Vae(nn.Module):
         return iterations_passed + batch_index
 
 
-    def test(self, test_loader, save_folder=None):
+    def test(self, test_loader, save_folder=None, test_programs=None):
         self.eval()
-        avg_tree_bleu_scores = {'bleu_1': 0, 'bleu_2': 0, 'bleu_3': 0, 'bleu_4': 0}
-        reconstructions = []
         iterations = 0
 
-        evaluator = Evaluator(self.vocabulary)
+        if self.metrics_helper == MetricsHelperTree2Tree:
+            evaluator = Tree2TreeEvaluator(self.vocabulary)
+        else:
+            evaluator = Seq2SeqEvaluator(self.vocabulary)
+
 
         with torch.no_grad():
             for batch in test_loader:
                 iterations += 1
-                new_reconstructions = self.evaluate(batch)
-                
-                tree_bleu_scores = self.calculate_eval_scores(new_reconstructions, batch)
-
-                # Add bleu scores to our dictionary
-                for key, score in tree_bleu_scores.items():
-                    avg_tree_bleu_scores[key] += score
+                reconstructions = self.evaluate(batch)
 
 
-                # Add reconstructions to total reconstructions
-                reconstructions.extend(new_reconstructions)
+                if self.metrics_helper == MetricsHelperTree2Tree:
+                    current_programs = test_programs[test_programs['solutionId'].map(str).isin(batch['ids'])]
+                    current_programs['solutionId'] = current_programs['solutionId'].astype(str)
+                    current_programs = current_programs.set_index('solutionId')
+                    
+                    evaluator.add_eval_hypotheses(current_programs.loc[batch['ids']]['solution'])
+                    evaluator.add_eval_references(reconstructions, batch['declared_names'])
 
-                evaluator.add_eval_hypotheses(batch)
-                evaluator.add_eval_references(new_reconstructions)
+                    evaluator.reconstructions_to_file(reconstructions, save_folder, batch['ids'])
+                else:
+                    evaluator.add_eval_hypotheses(batch['input'].tolist())
+                    evaluator.add_eval_references(reconstructions)
 
-                if iterations > 500:
+                    evaluator.reconstructions_to_file(reconstructions, save_folder)
+
+                if iterations > 2:
                     break
 
 
         # Get the average of the bleu scores over the entire test dataset
-        for key in avg_tree_bleu_scores.keys():
-            avg_tree_bleu_scores[key] /= iterations
+        # for key in avg_tree_bleu_scores.keys():
+        #     avg_tree_bleu_scores[key] /= iterations
 
-        seq_bleu_scores = evaluator.calc_bleu_score()
+        bleu_scores = evaluator.calc_bleu_score()
 
-        evaluator.reconstructions_to_file(reconstructions, save_folder)
         perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=True)
 
-        return avg_tree_bleu_scores, seq_bleu_scores, perc_compiles
+        return bleu_scores, perc_compiles
 
 
     def evaluate(self, batch):
@@ -263,11 +267,15 @@ class Vae(nn.Module):
         reconstructions = []
 
         for key in batch.keys():
-            if key not in ['tree_sizes', 'vocabs', 'declared_names']:
+            if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length']:
                 batch[key] = batch[key].to(self.device)
 
         z, _ = self.encoder(batch)
-        reconstructions += self.decoder(z, target=None, names_token2index=batch['declared_names'])
+
+        if self.metrics_helper == MetricsHelperTree2Tree:
+            reconstructions += self.decoder(z, target=None, names_token2index=batch['declared_names'])
+        else:
+            reconstructions += self.decoder(z)
 
         return reconstructions
 

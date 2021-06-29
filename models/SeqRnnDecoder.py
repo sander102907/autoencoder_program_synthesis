@@ -1,4 +1,5 @@
 import torch
+from torch._C import device
 import torch.nn as nn
 import torch.nn.utils.rnn as rnn_utils
 from model_utils.adaptive_softmax_pytorch import AdaptiveLogSoftmaxWithLoss
@@ -55,7 +56,7 @@ class SeqRnnDecoder(nn.Module):
                                             cutoffs=[30, 100, 1000],
                                             div_value=4.0)
 
-        self.prediction_layer = nn.Linear(rnn_hidden_size * (2 if bidirectional else 1), self.vocab_size)
+        # self.prediction_layer = nn.Linear(rnn_hidden_size * (2 if bidirectional else 1), self.vocab_size)
 
         # self.loss = nn.CrossEntropyLoss(reduction='sum')
 
@@ -138,49 +139,63 @@ class SeqRnnDecoder(nn.Module):
 
         
          # required for dynamic stopping of sentence generation
-        sequence_idx = torch.arange(0, batch_size, out=self.tensor()).long()  # all idx of batch
+        sequence_idx = torch.arange(0, batch_size, device=self.device, dtype=torch.long) # all idx of batch
         # all idx of batch which are still generating
-        sequence_running = torch.arange(0, batch_size, out=self.tensor()).long()
-        sequence_mask = torch.ones(batch_size, out=self.tensor()).bool()
+        sequence_running = torch.arange(0, batch_size, device=self.device, dtype=torch.long)
+        sequence_mask = torch.ones(batch_size, device=self.device, dtype=torch.bool)
         # idx of still generating sequences with respect to current loop
-        running_seqs = torch.arange(0, batch_size, out=self.tensor()).long()
+        running_seqs = torch.arange(0, batch_size, device=self.device, dtype=torch.long)
 
-        generations = self.tensor(batch_size, self.max_sequence_length).fill_(self.pad_idx).long()
+        generations = torch.full(fill_value=self.pad_idx, size=(batch_size, self.max_sequence_length), device=self.device, dtype=torch.long)
 
         t = 0
         while t < self.max_sequence_length and len(running_seqs) > 0:
 
             if t == 0:
-                sequence = torch.Tensor(size=batch_size, fill_value=self.sos_idx, dtype=torch.long, device=self.device)
+                sequence = torch.full(size=(batch_size,), fill_value=self.sos_idx, dtype=torch.long, device=self.device)
 
             sequence = sequence.unsqueeze(1)
 
-            seq_emb = self.embedding(sequence)
+            seq_emb = self.embedding_layer(sequence)
 
-            output, hidden = self.decoder_rnn(seq_emb, hidden)
+            output, hidden = self.rnn(seq_emb, hidden)
 
-            logits = self.prediction_layer(output)
+            logits = self.loss.log_prob(output.squeeze(1))
 
-            pred_seq = Sampling.sample(logits, temperature=0.7, top_k=40, top_p=0.9).view(-1)
+            sequence = Sampling.sample(logits, temperature=0.7, top_k=40, top_p=0.9).view(-1)
+
+            # Save the next sequence that will be input to the RNN
+            generations = self._save_sample(generations, sequence, sequence_running, t)
 
 
             # update gloabl running sequence
-            sequence_mask[sequence_running] = (pred_seq != self.eos_idx)
+            sequence_mask[sequence_running] = (sequence != self.eos_idx)
             sequence_running = sequence_idx.masked_select(sequence_mask)
 
             # update local running sequences
-            running_mask = (pred_seq != self.eos_idx).data
+            running_mask = (sequence != self.eos_idx).data
             running_seqs = running_seqs.masked_select(running_mask)
 
             # prune input and hidden state according to local update
             if len(running_seqs) > 0:
-                pred_seq = pred_seq[running_seqs]
+                sequence = sequence[running_seqs]
                 hidden = hidden[:, running_seqs]
 
-                running_seqs = torch.arange(0, len(running_seqs), out=self.tensor()).long()
+                running_seqs = torch.arange(0, len(running_seqs), device=self.device, dtype=torch.long)
 
             t += 1
 
         return generations
+
+
+    def _save_sample(self, save_to, sample, running_seqs, t):
+        # select only still running
+        running_latest = save_to[running_seqs]
+        # update token at position t
+        running_latest[:,t] = sample.data
+        # save back
+        save_to[running_seqs] = running_latest
+
+        return save_to
 
 

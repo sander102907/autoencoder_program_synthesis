@@ -65,9 +65,9 @@ class AstDataset(IterableDataset):
                         if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and depths > 0:
                             yield nodes, depths, ast_id
                     else:
-                        tree, nodes = self.preprocess(ast)
+                        tree, nodes, ast_id = self.preprocess(ast)
                         if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
-                            yield tree
+                            yield tree, ast_id
 
         # iterate over files that have to be shared between workers
         for file_index, file_path in enumerate(shared_files):
@@ -91,9 +91,9 @@ class AstDataset(IterableDataset):
                             if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and depths > 0:
                                 yield nodes, depths, ast_id
                         else:
-                            tree, nodes = self.preprocess(ast)
+                            tree, nodes, ast_id = self.preprocess(ast)
                             if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
-                                yield tree
+                                yield tree, ast_id
 
     def preprocess(self, ast):
         # load the JSON of the tree
@@ -110,7 +110,7 @@ class AstDataset(IterableDataset):
         else:
             tree = {}
 
-        return tree, nodes
+        return tree, nodes, ast[0]
 
     def get_statistics(self, ast):
         # load the JSON of the tree
@@ -383,6 +383,31 @@ class DeclaredNames():
             return f'{name}_{line}' in self.names.keys()
         else:
             return name in ['_'.join(k.split('_')[:-1]) for k in self.names.keys()]
+
+    def get_name(self, feature):
+        features = list(self.names.values())
+
+        if feature in features:
+            return '_'.join(list(self.names.keys())[features.index(feature)].split('_')[:-1])
+        else:
+            return -1
+
+
+    def get_closest_feature(self, name, line):
+        names_tokens = ['_'.join(k.split('_')[:-1]) for k in self.names.keys()]
+        lines = [int(k.split('_')[-1]) for k in self.names.keys()]
+
+        closest_distance = math.inf
+        feature = -1
+
+        for idx, (name_tok, name_line) in enumerate(zip(names_tokens, lines)):
+            if name_tok == name and math.fabs(name_line - line) < closest_distance:
+                closest_distance = math.fabs(name_line - line)
+                feature = list(self.names.values())[idx]
+
+        return feature
+
+
 
 
 

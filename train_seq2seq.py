@@ -179,8 +179,8 @@ class Trainer:
             self.save_config(save_dir)
             
 
-        self.model.fit(num_epochs, self.kl_scheduler, self.train_loader, self.val_loader, save_dir)
-        bleu_scores, perc_compiles = self.model.test(self.test_loader, str(_run._id))       
+        # self.model.fit(num_epochs, self.kl_scheduler, self.train_loader, self.val_loader, save_dir)
+        bleu_scores, perc_compiles = self.model.test(self.test_loader, save_folder=str(_run._id))       
 
         return bleu_scores, perc_compiles
 

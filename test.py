@@ -12,6 +12,8 @@ from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
 from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
 from model_utils.metrics_helper import MetricsHelperTree2Tree
 from config.vae_config import ex
+import pandas as pd
+pd.options.mode.chained_assignment = None
 
 
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -33,7 +35,7 @@ while True:
 
 @ex.config
 def set_config():
-    pretrained_model = 'checkpoints/cluster_latent300/iter31000.tar'
+    pretrained_model = 'checkpoints/cluster_latent300/iter54000.tar'
 
     folder = os.path.dirname(pretrained_model)
     
@@ -122,14 +124,16 @@ class Tester:
 
 
     @ex.capture
-    def run(self, save_dir, _run):
+    def run(self, save_dir, _run, dataset_paths):
         if save_dir is not None:
             save_dir = os.path.join(save_dir, str(_run._id))
             os.makedirs(save_dir, exist_ok=True)
 
-        avg_tree_bleu_scores, seq_bleu_scores, perc_compiles = self.model.test(self.test_loader, str(_run._id))
+        test_programs = pd.read_csv(dataset_paths['TEST_PROGRAMS'])
 
-        return avg_tree_bleu_scores, seq_bleu_scores, perc_compiles
+        bleu_scores, perc_compiles = self.model.test(self.test_loader, test_programs=test_programs, save_folder=str(_run._id))
+
+        return bleu_scores, perc_compiles
 
 
 
@@ -139,12 +143,9 @@ def main(pretrained_model):
     assert pretrained_model is not None and os.path.isfile(pretrained_model)
 
     tester = Tester()
-    avg_tree_bleu_scores, seq_bleu_scores, perc_compiles = tester.run()
-    
-    # results = ModelResults()
-    # results.from_dict(bleu_scores)
+    bleu_scores, perc_compiles = tester.run()
 
-    return {'seq_bleu_scores': seq_bleu_scores, 'avg_tree_bleu_scores': avg_tree_bleu_scores, 'percentage compiles': perc_compiles}
+    return {'bleu_scores': bleu_scores, 'percentage compiles': perc_compiles}
 
 if __name__ == "__main__":
     ex.run_commandline()

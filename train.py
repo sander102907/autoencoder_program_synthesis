@@ -171,20 +171,20 @@ class Trainer:
             
 
         self.model.fit(num_epochs, self.kl_scheduler, self.train_loader, self.val_loader, save_dir)
-        avg_tree_bleu_scores, seq_bleu_scores, perc_compiles = self.model.test(self.test_loader, str(_run._id))       
+        bleu_scores, perc_compiles = self.model.test(self.test_loader, str(_run._id))       
 
-        return avg_tree_bleu_scores, seq_bleu_scores, perc_compiles
+        return bleu_scores, perc_compiles
 
 
 @ex.main
 def main(_run):
     trainer = Trainer()
-    avg_tree_bleu_scores, seq_bleu_scores, perc_compiles = trainer.run()
+    bleu_scores, perc_compiles = trainer.run()
     
     # results = ModelResults()
     # results.from_dict(bleu_scores)
 
-    return {'seq_bleu_scores': seq_bleu_scores, 'avg_tree_bleu_scores': avg_tree_bleu_scores, 'percentage compiles': perc_compiles}
+    return {'bleu_scores': bleu_scores, 'percentage compiles': perc_compiles}
 
 if __name__ == "__main__":
     ex.run_commandline()

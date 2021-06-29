@@ -18,7 +18,7 @@ def get_config():
 
     # Standard model parameters
     num_epochs = 10
-    batch_size = 32
+    batch_size = 3
     learning_rate = 1e-3   
     num_rnn_layers_enc = 1  # The number of RNN layers for the encoder (>1 gives stacked RNN)
     num_rnn_layers_dec = 1  # The number of RNN layers for the decoder (>1 gives stacked RNN)
@@ -44,7 +44,7 @@ def get_config():
     max_program_size = 750          # Cut off last part of programs > max program size and pad the other programs to max program size
 
     # Advanced model parameters
-    pretrained_emb = 'glove-wiki-gigaword-50'   # Pretrained embedding to use (https://github.com/RaRe-Technologies/gensim-data/blob/master/list.json)
+    pretrained_emb = None #'glove-wiki-gigaword-50'   # Pretrained embedding to use (https://github.com/RaRe-Technologies/gensim-data/blob/master/list.json)
     vae = True                                  # Turning this off will revert to standard AE architecture
     use_cell_output_lstm = False                # In case of LSTM RNN, use also the cell state concatenated with the hidden state as output
     indiv_embed_layers = False                  # Use individual embedding layers for each vocab/node type
@@ -68,30 +68,33 @@ def get_config():
 
 
     # Load pretrained model
-    pretrained_model = None
+    pretrained_model = 'checkpoints/774/iter3000.tar'
 
 
     # Data path parameters
     tokens_paths = {
-        'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
-        'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
-        'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
-        'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
-        'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
+        # 'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
+        # 'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
+        # 'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
+        # 'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
+        # 'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
 
 
         # For the seq2seq model
-        # 'ALL' : '../sequence_data_preprocessing/tokens/',
+        'ALL' : '../data/seq_data/token_counts/',
     }
 
     dataset_paths = {
-        'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
-        'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
-        'TEST': '../data/ast_trees_full_19-06-2021/asts_test/'
+        # 'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
+        # 'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
+        # 'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
+        # 'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
 
 
         # For the seq2seq model
-        # 'ALL': '../sequence_data_preprocessing/programs/',
+        'TRAIN': '../data/seq_data/programs_train/',
+        'VAL': '../data/seq_data/programs_val/',
+        'TEST': '../data/seq_data/programs_test/'
     } 
 
 
