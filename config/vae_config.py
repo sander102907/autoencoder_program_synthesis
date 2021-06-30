@@ -18,7 +18,7 @@ def get_config():
 
     # Standard model parameters
     num_epochs = 10
-    batch_size = 2
+    batch_size = 32
     learning_rate = 1e-3   
     num_rnn_layers_enc = 1  # The number of RNN layers for the encoder (>1 gives stacked RNN)
     num_rnn_layers_dec = 1  # The number of RNN layers for the decoder (>1 gives stacked RNN)
