@@ -4,7 +4,7 @@ from sacred.observers import MongoObserver
 EXPERIMENT_NAME = 'Experiment'
 DATABASE_NAME = 'Autoencoder_program_synthesis'
 URL = f'mongodb+srv://sander:9AqrPVfuPJuv0ajP@cluster0.b2wvr.mongodb.net/{DATABASE_NAME}?retryWrites=true&w=majority'
-URL = None
+# URL = None
 
 ex = Experiment(EXPERIMENT_NAME)
 
@@ -18,7 +18,7 @@ def get_config():
 
     # Standard model parameters
     num_epochs = 10
-    batch_size = 8
+    batch_size = 2
     learning_rate = 1e-3   
     num_rnn_layers_enc = 1  # The number of RNN layers for the encoder (>1 gives stacked RNN)
     num_rnn_layers_dec = 1  # The number of RNN layers for the decoder (>1 gives stacked RNN)
@@ -62,7 +62,7 @@ def get_config():
 
 
     # Early stopping parameters
-    check_early_stop_every = 3000                # Update early stop loss every X batches
+    check_early_stop_every = 8000                # Update early stop loss every X batches
     early_stop_patience = 3                     # how many steps to wait before stopping when loss is not improving
     early_stop_min_delta = 0                    # minimum difference between new loss and old loss for new loss to be considered as an improvement
 
@@ -73,28 +73,28 @@ def get_config():
 
     # Data path parameters
     tokens_paths = {
-        'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
-        'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
-        'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
-        'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
-        'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
+        # 'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
+        # 'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
+        # 'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
+        # 'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
+        # 'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
 
 
         # For the seq2seq model
-        # 'ALL' : '../data/seq_data/token_counts/',
+        'ALL' : '../data/seq_data/token_counts/',
     }
 
     dataset_paths = {
-        'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
-        'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
-        'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
-        'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
+        # 'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
+        # 'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
+        # 'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
+        # 'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
 
 
         # For the seq2seq model
-        # 'TRAIN': '../data/seq_data/programs_train/',
-        # 'VAL': '../data/seq_data/programs_val/',
-        # 'TEST': '../data/seq_data/programs_test/'
+        'TRAIN': '../data/seq_data/programs_train/',
+        'VAL': '../data/seq_data/programs_val/',
+        'TEST': '../data/seq_data/programs_test/'
     } 
 
 
