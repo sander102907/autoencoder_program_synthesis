@@ -66,6 +66,22 @@ def calculate_evaluation_orders_topdown(adj_list, adj_list_sib, tree_size):
 
     edge_order_sib[edge_order_sib == 0] = node_order[adj_list_sib[adj_list_sib[:, 0] == 0, 1]] - 1
 
+
+    # Make sure we process all the leaves last, to ensure that we declare names before we move on
+    leaves = child_nodes[~np.isin(child_nodes, parent_nodes)]
+    non_leaves = np.unique(parent_nodes[~np.isin(parent_nodes, leaves)])
+    
+    # First get the maximum node order of the non leaf nodes
+    order_next_leaf = max(node_order[non_leaves]) + 1
+
+    
+    # Iterate over the leaves and give the order +1 for each new leaf
+    for leaf in leaves:
+        node_order[leaf] = order_next_leaf
+        edge_order[np.where(child_nodes == leaf)] = order_next_leaf - 1 
+        edge_order_sib[np.where(next_sib_nodes == leaf)] = order_next_leaf - 1
+        order_next_leaf += 1
+
     return node_order, edge_order, edge_order_sib
 
 

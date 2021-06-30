@@ -18,7 +18,7 @@ def get_config():
 
     # Standard model parameters
     num_epochs = 10
-    batch_size = 3
+    batch_size = 8
     learning_rate = 1e-3   
     num_rnn_layers_enc = 1  # The number of RNN layers for the encoder (>1 gives stacked RNN)
     num_rnn_layers_dec = 1  # The number of RNN layers for the decoder (>1 gives stacked RNN)
@@ -68,33 +68,33 @@ def get_config():
 
 
     # Load pretrained model
-    pretrained_model = 'checkpoints/774/iter3000.tar'
+    pretrained_model = None #'checkpoints/774/iter3000.tar'
 
 
     # Data path parameters
     tokens_paths = {
-        # 'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
-        # 'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
-        # 'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
-        # 'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
-        # 'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
+        'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
+        'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
+        'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
+        'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
+        'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
 
 
         # For the seq2seq model
-        'ALL' : '../data/seq_data/token_counts/',
+        # 'ALL' : '../data/seq_data/token_counts/',
     }
 
     dataset_paths = {
-        # 'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
-        # 'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
-        # 'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
-        # 'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
+        'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
+        'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
+        'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
+        'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
 
 
         # For the seq2seq model
-        'TRAIN': '../data/seq_data/programs_train/',
-        'VAL': '../data/seq_data/programs_val/',
-        'TEST': '../data/seq_data/programs_test/'
+        # 'TRAIN': '../data/seq_data/programs_train/',
+        # 'VAL': '../data/seq_data/programs_val/',
+        # 'TEST': '../data/seq_data/programs_test/'
     } 
 
 

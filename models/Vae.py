@@ -93,9 +93,9 @@ class Vae(nn.Module):
         for epoch in range(epochs):
             print('INFO - Starting on epoch: ', epoch)
             # Fit one epoch of training
-            # current_iter_train, current_iter_val = self._fit_epoch(train_loader, val_loader, kl_scheduler, current_iter_train,
-            #                                            current_iter_val, clip_grad_norm, clip_grad_val, check_early_stop_every,
-            #                                            early_stopping, save_every, save_dir, _run)
+            current_iter_train, current_iter_val = self._fit_epoch(train_loader, val_loader, kl_scheduler, current_iter_train,
+                                                       current_iter_val, clip_grad_norm, clip_grad_val, check_early_stop_every,
+                                                       early_stopping, save_every, save_dir, _run)
 
             # Validate one epoch
             current_iter_val = self._val_epoch(val_loader, current_iter_val, early_stopping, _run)
