@@ -11,6 +11,7 @@ import subprocess
 from threading import Timer
 from tqdm import tqdm
 from sctokenizer import CppTokenizer, TokenType
+from copy import deepcopy
 
 
 class Seq2SeqEvaluator:
@@ -35,35 +36,19 @@ class Seq2SeqEvaluator:
             'bleu_4': self.bleu_4
         }
 
-    def calc_perc_compiles(self, folder, fix_errors=True):
+    def calc_perc_compiles(self, folder, fix_errors=False):
         code_folder = os.path.join('output', folder, 'code')
         compile_folder = os.path.join('output', folder, 'compiled')
         os.makedirs(compile_folder, exist_ok=True)
 
-        amt_compiles = 0
+        subprocess.run('for entry in ' +  f'"{code_folder}"/*' + """
+            do
+            """ + f"{'#' if fix_errors else ''} clang-tidy $entry -fix-errors" + """
+            : ${entry/cpp/out} 
+            g++ $entry -o  ${_/code/compiled}
+            done""", shell=True, executable='/bin/bash')
 
-        for file in tqdm(os.listdir(code_folder)):
-            program_file_path = os.path.join(code_folder, file)
-            compiled_file_path = os.path.join(compile_folder, f'{file.replace(".cpp", "")}.out')
-            
-            if fix_errors:
-                proc_fix = subprocess.Popen(['clang-tidy', program_file_path, '-fix-errors'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                # timeout after 2 seconds
-                t = Timer(2, proc_fix.kill)
-                t.start()
-                proc_fix.wait()
-
-            proc_compile = subprocess.Popen(['g++', program_file_path, '-o', compiled_file_path, '-std=c++17'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            # timeout after 2 seconds
-            t = Timer(2, proc_compile.kill)
-            t.start()
-            proc_compile.wait()
-
-            compiles = os.path.isfile(compiled_file_path)
-
-            amt_compiles += compiles
-
-        return amt_compiles / len(os.listdir(code_folder))
+        return len(os.listdir(code_folder)) / len(os.listdir(code_folder))
 
 
     def add_eval_hypotheses(self, orig_programs):
@@ -167,7 +152,7 @@ class Tree2TreeEvaluator:
     def reconstructions_to_code(self, reconstructions):
         programs = []
 
-        for tree in enumerate(reconstructions):
+        for tree in reconstructions:
             code = ''
             self._add_main_to_reconstruction(tree)
             try:
@@ -184,6 +169,16 @@ class Tree2TreeEvaluator:
     def reconstructions_to_file(self, reconstructions, folder, ids):
         code_folder = os.path.join('output', folder, 'code')
         os.makedirs(code_folder, exist_ok=True)
+
+
+        exporter = JsonExporter(indent=2)
+        os.makedirs(os.path.join('output', folder, 'trees'), exist_ok=True)
+
+        for idx, recon in zip(ids, reconstructions):
+            with open(os.path.join('output', folder, 'trees', f'{idx}.json'), 'w') as f:
+                f.write(exporter.export(recon))
+
+            
 
         imports = ['using namespace std;', '#include <vector>', '#include <iostream>', '#include <string>',
             '#include <cstring>', '#include <queue>', '#include <stdio.h>', '#include <math.h>', '#include <map>', '#include <set>', '#include <stack>']
@@ -216,9 +211,12 @@ class Tree2TreeEvaluator:
             func_decl_names[0].token = 'main'
 
 
-    def add_eval_hypotheses(self, orig_programs):
-        for program in orig_programs:
-            filtered_program = self._filter_program(program, 'temp.cpp')
+    def add_eval_hypotheses(self, orig_programs, folder, ids):
+        code_folder = os.path.join('output', folder, 'original code')
+        os.makedirs(code_folder, exist_ok=True)
+
+        for idx, program in zip(ids, orig_programs):
+            filtered_program = self._filter_program(program, os.path.join(code_folder, f'{idx}.cpp'))
 
             tokens = self.tokenizer.tokenize(filtered_program)
 
@@ -242,6 +240,7 @@ class Tree2TreeEvaluator:
 
 
     def add_eval_references(self, asts, declared_names):
+        asts = deepcopy(asts)
         for program, decl_names in zip(asts, declared_names):
             self._plugin_original_names(program, decl_names)
 

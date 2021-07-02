@@ -1,3 +1,4 @@
+from os import name
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -478,16 +479,18 @@ class TreeLstmDecoderComplete(nn.Module):
             h_parent = hidden
             c_parent = rnn_empty_init
 
+        name_eval_nodes = NameEvalNodes(self.device)
+
         parent_state = [(h_parent, c_parent) for _ in range(self.num_rnn_layers_dec)]
         sibling_state = [(rnn_empty_init, rnn_empty_init) for _ in range(self.num_rnn_layers_dec)]
 
-        trees = self.decode_eval(parent_state, sibling_state, names_index2token)
+        trees = self.decode_eval(parent_state, sibling_state, names_index2token, name_eval_nodes)
 
         return trees
 
 
-    def decode_eval(self, parent_state, sibling_state, names_index2token, parent_nodes=None, declared_names=None, program_ids=None, sibling_path_offsets=None, iteration=0):
-        if iteration > 50:
+    def decode_eval(self, parent_state, sibling_state, names_index2token, name_eval_nodes, parent_nodes=None, declared_names=None, program_ids=None, sibling_path_offsets=None, iteration=0):
+        if iteration > 50 and not name_eval_nodes.processing_names:
             print(f'Stopped due to recursion level going over {iteration} iterations')
             return parent_nodes
 
@@ -495,14 +498,13 @@ class TreeLstmDecoderComplete(nn.Module):
         batch_size = parent_state[0][0].shape[0]
         # If we are at the root
         if parent_nodes is None:
-
             # Get the root node ID
             root_id = self.vocabulary.token2index['RES']['root']
 
             # Create root node of the tree
             parent_nodes = [Node(root_id, is_reserved=True, parent=None) for _ in range(batch_size)]
             declared_names = [{} for _ in range(batch_size)]
-            program_ids = torch.tensor([i for i in range(batch_size)])
+            program_ids = [i for i in range(batch_size)]
             sibling_path_offsets = [[0] for _ in range(batch_size)]
 
             # Update the parent state
@@ -518,7 +520,7 @@ class TreeLstmDecoderComplete(nn.Module):
 
 
             # Pass new parent state and no sibling state as we start with the first sibling
-            self.decode_eval(parent_state, sibling_state, names_index2token, parent_nodes, declared_names, program_ids, sibling_path_offsets)
+            self.decode_eval(parent_state, sibling_state, names_index2token, name_eval_nodes, parent_nodes, declared_names, program_ids, sibling_path_offsets)
 
         else:
             h_parent, c_parent = parent_state[-1]
@@ -642,6 +644,7 @@ class TreeLstmDecoderComplete(nn.Module):
             predicted_labels[name_indices] = torch.tensor(predicted_name_labels, dtype=torch.long, device=self.device)
 
             nodes = []
+            nodes_labels = []
 
             for idx, predicted_label in enumerate(predicted_labels):
                 # Build tree: Add node to tree
@@ -660,134 +663,188 @@ class TreeLstmDecoderComplete(nn.Module):
 
                 nodes.append(node)
 
-
-            if self.indiv_embed_layers:
-                emb_labels = torch.zeros(batch_size, self.embedding_dim, device=self.device)
-
-                for node_type, emb_layer in self.embedding_layers.items():
-                    if node_type == 'RES':
-                        mask = is_res
-                    elif node_type == 'LITERAL':
-                        mask = literal_indices
-                    elif node_type == 'TYPE':
-                        mask = type_indices
-                    elif node_type == 'NAME_BUILTIN':
-                        mask = name_builtin_indices
-                    else:
-                        mask = name_indices
-
-                    emb_labels[mask] = emb_layer(predicted_labels[mask]).view(-1, self.embedding_dim)
-            else:
-                # predicted_labels[is_res] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['RES'][token.item()]] for token in predicted_labels[is_res]], dtype=torch.long, device=self.device)
-                # predicted_labels[type_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['TYPE'][token.item()]] for token in predicted_labels[type_indices]], dtype=torch.long, device=self.device)
-                # predicted_labels[name_builtin_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['NAME_BUILTIN'][token.item()]] for token in predicted_labels[name_builtin_indices]], dtype=torch.long, device=self.device)
-                # predicted_labels[literal_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['LITERAL'][token.item()]] for token in predicted_labels[literal_indices]], dtype=torch.long, device=self.device)
-                # predicted_labels[name_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['NAME'][token.item()]] for token in predicted_labels[name_indices]], dtype=torch.long, device=self.device)
-
-                try:
-                    predicted_labels = torch.tensor(
-                        [self.vocabulary.token2index['ALL'][self.vocabulary.index2token[n_types[n_type.item()]][token.item()]] for token, n_type in zip(predicted_labels, node_types)],
-                        dtype=torch.long,
-                        device=self.device
-                    )
-                except Exception as e:
-                    print(e, predicted_labels.tolist(), node_types.tolist(), declared_names[0].keys())
-                    return
-
-                emb_labels = self.embedding_layers['ALL'](predicted_labels).view(-1, self.embedding_dim)
-
-            # Lists to save the new parent and sibling states
-            total_sibling_state = []
-            total_parent_state = []
-
-            empty_init = torch.zeros(batch_size, self.rnn_hidden_size, device=self.device)
-
-            # Get new siblings state, if there are any next siblings
-            if torch.count_nonzero(has_sibling) > 0:
-                new_sibling_state = self.rnns_sibling(emb_labels, sibling_state)   
-            else:
-                new_sibling_state = [(empty_init, empty_init) for _ in range(self.num_rnn_layers_dec)]
-
-
-            # Create a copy of the parent state (we need the original for the next siblings)
-            new_parent_state = parent_state[:]
-
-            # Update the las layer of the parent state with the add gate update
-            if self.use_cell_output_lstm: 
-                new_parent_state[-1] = parent_state_updated
-            else:
-                new_parent_state[-1] = (parent_state_updated, new_parent_state[-1][1])
-
-
-            # Get new parent state, if there are any next children
-            if torch.count_nonzero(is_parent) > 0:
-                new_parent_state = self.rnns_parent(emb_labels, new_parent_state)
-            else:
-                new_parent_state = [(empty_init, empty_init) for _ in range(self.num_rnn_layers_dec)]
-
-
-            empty_init = torch.zeros(torch.count_nonzero(is_parent), self.rnn_hidden_size, device=self.device)
-
-
-            for i in range(self.num_rnn_layers_dec):
-                # Get the parent states, for the next children nodes
-                p_state_h_par = new_parent_state[i][0][is_parent]
-                p_state_c_par = new_parent_state[i][1][is_parent]
-
-                # Get the parent states, for the next sibling nodes
-                # Note that we do not use the new parent state here
-                # As next siblings have the same parent
-                p_state_h_sib = parent_state[i][0][has_sibling]
-                p_state_c_sib = parent_state[i][1][has_sibling]
-
-                # Concatenate the parent states, children first then siblings
-                p_state_h = torch.cat([p_state_h_par, p_state_h_sib])
-                p_state_c = torch.cat([p_state_c_par, p_state_c_sib])
-
-                # Append parent states of this RNN layer to total state
-                total_parent_state.append((p_state_h, p_state_c))
-
-
-                # Get the sibling states, for the next children nodes
-                # Note, new children do not have any siblings
-                s_state_h_par = empty_init
-                s_state_c_par = empty_init
-
-                # Get the sibling states, for the next sibling nodes
-                s_state_h_sib = new_sibling_state[i][0][has_sibling]
-                s_state_c_sib = new_sibling_state[i][1][has_sibling]
-
-                # Concatenate the sibling states, children first, then siblings
-                s_state_h = torch.cat([s_state_h_par, s_state_h_sib])
-                s_state_c = torch.cat([s_state_c_par, s_state_c_sib])
-
-                # Append sibling states of this RNN layer to the total state
-                total_sibling_state.append((s_state_h, s_state_c))
-
-
-            # Update the parent nodes, children first, then siblings
-            parent_nodes = [node for is_p, node in zip(is_parent, nodes) if is_p] \
-                         + [node for has_s, node in zip(has_sibling, parent_nodes) if has_s]
-
-
-            # Update the oov name index to token vocabs, children first, then siblings
-            if names_index2token is not None: 
-                names_index2token = [vocab for is_p, vocab in zip(is_parent, names_index2token) if is_p] \
-                                     + [vocab for has_s, vocab in zip(has_sibling, names_index2token) if has_s]
-
-
-            # update the program ids (to keep track of declared names), children first, then siblings
-            program_ids = [idx for is_p, idx in zip(is_parent, program_ids) if is_p] \
-                        + [idx for has_s, idx in zip(has_sibling, program_ids) if has_s]
-
-
-            sibling_path_offsets = [offset + [0] for is_p, offset in zip(is_parent, sibling_path_offsets) if is_p] \
-                                 + [offset[:-1] + [offset[-1] + 1] for has_s, offset in zip(has_sibling, sibling_path_offsets) if has_s]
-
+                if node.token in self.vocabulary.index2token['RES']:
+                    nodes_labels.append(self.vocabulary.index2token['RES'][node.token])
+                else:
+                    nodes_labels.append('default token')
 
             # If there are next children or siblings, recursively continue
             if torch.count_nonzero(has_sibling) > 0 or torch.count_nonzero(is_parent) > 0:
-                self.decode_eval(total_parent_state, total_sibling_state, names_index2token, parent_nodes, declared_names, program_ids, sibling_path_offsets, iteration + 1)
+
+                if self.indiv_embed_layers:
+                    emb_labels = torch.zeros(batch_size, self.embedding_dim, device=self.device)
+
+                    for node_type, emb_layer in self.embedding_layers.items():
+                        if node_type == 'RES':
+                            mask = is_res
+                        elif node_type == 'LITERAL':
+                            mask = literal_indices
+                        elif node_type == 'TYPE':
+                            mask = type_indices
+                        elif node_type == 'NAME_BUILTIN':
+                            mask = name_builtin_indices
+                        else:
+                            mask = name_indices
+
+                        emb_labels[mask] = emb_layer(predicted_labels[mask]).view(-1, self.embedding_dim)
+                else:
+                    # predicted_labels[is_res] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['RES'][token.item()]] for token in predicted_labels[is_res]], dtype=torch.long, device=self.device)
+                    # predicted_labels[type_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['TYPE'][token.item()]] for token in predicted_labels[type_indices]], dtype=torch.long, device=self.device)
+                    # predicted_labels[name_builtin_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['NAME_BUILTIN'][token.item()]] for token in predicted_labels[name_builtin_indices]], dtype=torch.long, device=self.device)
+                    # predicted_labels[literal_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['LITERAL'][token.item()]] for token in predicted_labels[literal_indices]], dtype=torch.long, device=self.device)
+                    # predicted_labels[name_indices] = torch.tensor([self.vocabulary.token2index['ALL'][self.vocabulary.index2token['NAME'][token.item()]] for token in predicted_labels[name_indices]], dtype=torch.long, device=self.device)
+
+                    try:
+                        predicted_labels = torch.tensor(
+                            [self.vocabulary.token2index['ALL'][self.vocabulary.index2token[n_types[n_type.item()]][token.item()]] for token, n_type in zip(predicted_labels, node_types)],
+                            dtype=torch.long,
+                            device=self.device
+                        )
+                    except Exception as e:
+                        print(e, predicted_labels.tolist(), node_types.tolist(), declared_names[0].keys())
+                        return
+
+                    emb_labels = self.embedding_layers['ALL'](predicted_labels).view(-1, self.embedding_dim)
+
+                # Lists to save the new parent and sibling states
+                total_sibling_state = []
+                total_parent_state = []
+
+
+                total_sibling_state_names = []
+                total_parent_state_names = []
+
+                empty_init = torch.zeros(batch_size, self.rnn_hidden_size, device=self.device)
+
+                # Get new siblings state, if there are any next siblings
+                if torch.count_nonzero(has_sibling) > 0:
+                    new_sibling_state = self.rnns_sibling(emb_labels, sibling_state)   
+                else:
+                    new_sibling_state = [(empty_init, empty_init) for _ in range(self.num_rnn_layers_dec)]
+
+
+                # Create a copy of the parent state (we need the original for the next siblings)
+                new_parent_state = parent_state[:]
+
+                # Update the las layer of the parent state with the add gate update
+                if self.use_cell_output_lstm: 
+                    new_parent_state[-1] = parent_state_updated
+                else:
+                    new_parent_state[-1] = (parent_state_updated, new_parent_state[-1][1])
+
+
+                # Get new parent state, if there are any next children
+                if torch.count_nonzero(is_parent) > 0:
+                    new_parent_state = self.rnns_parent(emb_labels, new_parent_state)
+                else:
+                    new_parent_state = [(empty_init, empty_init) for _ in range(self.num_rnn_layers_dec)]
+
+
+                # Get current node types, to put name nodes in a queue for predicting last
+                # node_types = torch.zeros(batch_size, device=self.device)
+
+                # name_builtin_indices = [idx for idx, label in enumerate(nodes_labels) if 'REF_BUILTIN' == label]
+                # literal_indices = [idx for idx, label in enumerate(nodes_labels) if 'LITERAL' in label]
+                # type_indices = [idx for idx, label in enumerate(nodes_labels) if 'TYPE' == label]
+
+                # node_types[name_builtin_indices] = 1
+                # node_types[is_res] = 2
+                # node_types[literal_indices] = 3
+                # node_types[type_indices] = 4
+
+                # name_indices = node_types == 0
+
+                name_indices = torch.tensor([True if label in ['REF', 'NAME', 'IDENTIFIER', 'TYPE_REF'] else False for label in nodes_labels], device=self.device)
+
+                empty_init = torch.zeros(torch.count_nonzero(is_parent & ~name_indices), self.rnn_hidden_size, device=self.device)
+                empty_init_names = torch.zeros(torch.count_nonzero(is_parent & name_indices), self.rnn_hidden_size, device=self.device)
+
+
+                for i in range(self.num_rnn_layers_dec):
+                    # Get the parent states, for the next children nodes
+                    p_state_h_par = new_parent_state[i][0][is_parent & ~name_indices]
+                    p_state_c_par = new_parent_state[i][1][is_parent & ~name_indices]
+
+                    # Get the parent states, for the next sibling nodes
+                    # Note that we do not use the new parent state here
+                    # As next siblings have the same parent
+                    p_state_h_sib = parent_state[i][0][has_sibling]
+                    p_state_c_sib = parent_state[i][1][has_sibling]
+
+                    # Concatenate the parent states, children first then siblings
+                    p_state_h = torch.cat([p_state_h_par, p_state_h_sib])
+                    p_state_c = torch.cat([p_state_c_par, p_state_c_sib])
+
+                    # Append parent states of this RNN layer to total state
+                    total_parent_state.append((p_state_h, p_state_c))
+
+
+                    p_state_h_names = new_parent_state[i][0][is_parent & name_indices]
+                    p_state_c_names = new_parent_state[i][1][is_parent & name_indices]
+
+                    total_parent_state_names.append((p_state_h_names, p_state_c_names))
+
+
+                    # Get the sibling states, for the next children nodes
+                    # Note, new children do not have any siblings
+                    s_state_h_par = empty_init
+                    s_state_c_par = empty_init
+
+                    # Get the sibling states, for the next sibling nodes
+                    s_state_h_sib = new_sibling_state[i][0][has_sibling]
+                    s_state_c_sib = new_sibling_state[i][1][has_sibling]
+
+                    # Concatenate the sibling states, children first, then siblings
+                    s_state_h = torch.cat([s_state_h_par, s_state_h_sib])
+                    s_state_c = torch.cat([s_state_c_par, s_state_c_sib])
+
+                    # Append sibling states of this RNN layer to the total state
+                    total_sibling_state.append((s_state_h, s_state_c))
+
+
+                    total_sibling_state_names.append((empty_init_names, empty_init_names))
+
+
+                parent_nodes_names = [node for is_p, node, is_name in zip(is_parent, nodes, name_indices) if is_p and is_name]
+
+                # Update the parent nodes, children first, then siblings
+                parent_nodes = [node for is_p, node, is_name in zip(is_parent, nodes, name_indices) if is_p and not is_name] \
+                                + [node for has_s, node in zip(has_sibling, parent_nodes) if has_s]
+
+
+                # Update the oov name index to token vocabs, children first, then siblings
+                names_index2token_names = None
+
+                if names_index2token is not None: 
+                    names_index2token_names = [vocab for is_p, vocab, is_name in zip(is_parent, names_index2token, name_indices) if is_p and is_name]
+
+                    names_index2token = [vocab for is_p, vocab, is_name in zip(is_parent, names_index2token, name_indices) if is_p and not is_name] \
+                                            + [vocab for has_s, vocab in zip(has_sibling, names_index2token) if has_s]
+
+
+                program_ids_names = [idx for is_p, idx, is_name in zip(is_parent, program_ids, name_indices) if is_p and is_name]
+
+
+                # update the program ids (to keep track of declared names), children first, then siblings
+                program_ids = [idx for is_p, idx, is_name in zip(is_parent, program_ids, name_indices) if is_p and not is_name] \
+                            + [idx for has_s, idx in zip(has_sibling, program_ids) if has_s]
+
+
+                sibling_path_offsets_names = [offset + [0] for is_p, offset, is_name in zip(is_parent, sibling_path_offsets, name_indices) if is_p and is_name]
+
+                sibling_path_offsets = [offset + [0] for is_p, offset, is_name in zip(is_parent, sibling_path_offsets, name_indices) if is_p and not is_name] \
+                                        + [offset[:-1] + [offset[-1] + 1] for has_s, offset in zip(has_sibling, sibling_path_offsets) if has_s]
+
+
+                name_eval_nodes.add_nodes(total_parent_state_names, total_sibling_state_names, names_index2token_names, parent_nodes_names, program_ids_names, sibling_path_offsets_names)
+
+                if len(parent_nodes) > 0:
+                    self.decode_eval(total_parent_state, total_sibling_state, names_index2token, name_eval_nodes, parent_nodes, declared_names, program_ids, sibling_path_offsets, iteration + 1)
+
+            if not name_eval_nodes.is_empty():
+                total_parent_state, total_sibling_state, names_index2token, parent_nodes, program_ids, sibling_path_offsets = name_eval_nodes.get_next()
+
+                self.decode_eval(total_parent_state, total_sibling_state, names_index2token, name_eval_nodes, parent_nodes, declared_names, program_ids, sibling_path_offsets, iteration + 1)
 
 
         # If we are done, return the parent nodes (which contain the entire trees)
@@ -800,3 +857,128 @@ class TreeLstmDecoderComplete(nn.Module):
                 return True
             if cur < decl:
                 return False
+
+
+class NameEvalNodes:
+    def __init__(self, device) -> None:
+        self.device = device
+        self.parent_states = []
+        self.sibling_states = []
+        self.names_index2token = None
+        self.parent_nodes = []
+        self.program_ids = []
+        self.sibling_path_offsets = []
+        self.processing_names = False
+
+
+    def add_nodes(self, parent_states, sibling_states, names_index2token, parent_nodes, program_ids, sibling_path_offsets):
+        if names_index2token is not None:
+            if self.names_index2token is None:
+                self.names_index2token = list(names_index2token)
+            else:
+                self.names_index2token.extend(names_index2token)
+
+        self.parent_nodes.extend(parent_nodes)
+        self.program_ids.extend(program_ids)
+        self.sibling_path_offsets.extend(sibling_path_offsets)
+
+
+        if len(self.parent_states) == 0:
+            self.parent_states.extend(parent_states)
+            self.sibling_states.extend(sibling_states)
+
+        else:
+            for i in range(len(self.parent_states)):
+                self.parent_states[i] = (torch.cat([self.parent_states[i][0], parent_states[i][0]]), torch.cat([self.parent_states[i][1], parent_states[i][1]])) 
+                self.sibling_states[i] = (torch.cat([self.sibling_states[i][0], sibling_states[i][0]]), torch.cat([self.sibling_states[i][1], sibling_states[i][1]])) 
+
+    def is_empty(self):
+        return len(self.parent_nodes) == 0
+
+
+    def sort(self):
+        sorted_idxs = self.get_sorted_idxs()
+
+        self.parent_nodes = np.array(self.parent_nodes)[sorted_idxs]
+        self.program_ids = np.array(self.program_ids)[sorted_idxs]
+
+        if self.names_index2token is not None:
+            self.names_index2token = list(np.array(self.names_index2token)[sorted_idxs])
+
+        for i in range(len(self.parent_states)):
+            self.parent_states[i] = (self.parent_states[i][0][sorted_idxs], self.parent_states[i][1][sorted_idxs])
+            
+        # Sibling states dont have to be sorted, they are always empty for names
+        
+
+    def get_sorted_idxs(self):
+        length = len(self.sibling_path_offsets)
+        idxs = list(range(length))
+
+        for i in range(length):
+            for j in range(length - i - 1):
+                for first, second in zip(self.sibling_path_offsets[j], self.sibling_path_offsets[j + 1]):
+                    if first > second:
+                        temp = self.sibling_path_offsets[j]
+                        self.sibling_path_offsets[j] = self.sibling_path_offsets[j + 1]
+                        self.sibling_path_offsets[j + 1] = temp
+
+                        temp_idx = idxs[j]
+                        idxs[j] = idxs[j + 1]
+                        idxs[j + 1] = temp_idx
+                        break
+                    if second > first:
+                        break
+
+        return idxs
+
+
+
+    def get_next(self):
+        if not self.processing_names:
+            self.processing_names = True
+            self.sort()
+
+        # get indices of first occurences of the program ids
+        idxs = np.unique(self.program_ids, return_index=True)[1]
+
+        next_program_ids = list(np.array(self.program_ids)[idxs])
+        next_names_index2token = None
+
+        if self.names_index2token is not None:
+            next_names_index2token = list(np.array(self.names_index2token)[idxs])
+
+        next_parent_nodes = list(np.array(self.parent_nodes)[idxs])
+        next_sibling_path_offsets = list(np.array(self.sibling_path_offsets, dtype=object)[idxs])
+
+        next_parent_states = []
+        next_sibling_states = []
+
+        for i in range(len(self.parent_states)):
+            next_parent_states.append((self.parent_states[i][0][idxs], self.parent_states[i][1][idxs]))
+            next_sibling_states.append((self.sibling_states[i][0][idxs], self.sibling_states[i][1][idxs]))
+
+        self.remove_next(idxs)
+
+
+        return next_parent_states, next_sibling_states, next_names_index2token, next_parent_nodes, next_program_ids, next_sibling_path_offsets
+
+
+    def remove_next(self, idxs):
+        self.sibling_path_offsets = list(np.delete(np.array(self.sibling_path_offsets, dtype='object'), idxs, axis=0))
+        self.program_ids = list(np.delete(self.program_ids, idxs, axis=0))
+
+        if self.names_index2token is not None:
+            self.names_index2token = list(np.delete(np.array(self.names_index2token), idxs, axis=0))
+
+        self.parent_nodes = list(np.delete(np.array(self.parent_nodes), idxs, axis=0))
+        
+
+        for i in range(len(self.parent_states)):
+            self.parent_states[i] = (self.parent_states[i][0][np.setdiff1d(range(len(self.parent_states[i][0])), idxs)], self.parent_states[i][1][np.setdiff1d(range(len(self.parent_states[i][1])), idxs)]) # (np.delete(self.parent_states[i][0].cpu(), idxs).to(self.device), np.delete(self.parent_states[i][1].cpu(), idxs).to(self.device))
+            self.sibling_states[i] = (self.sibling_states[i][0][np.setdiff1d(range(len(self.sibling_states[i][0])), idxs)], self.sibling_states[i][1][np.setdiff1d(range(len(self.sibling_states[i][1])), idxs)]) # (np.delete(self.sibling_states[i][0].cpu(), idxs).to(self.device), np.delete(self.sibling_states[i][1].cpu(), idxs).to(self.device))
+
+        # print(len(self.parent_states), self.parent_states, self.parent_states[0][0].shape)
+
+
+

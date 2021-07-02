@@ -9,6 +9,7 @@ from nltk.translate.bleu_score import corpus_bleu
 from utils.TreeNode import Node
 from utils.evaluation import Seq2SeqEvaluator, Tree2TreeEvaluator
 from config.vae_config import ex
+from tqdm import tqdm
     
 
 class Vae(nn.Module):
@@ -223,7 +224,7 @@ class Vae(nn.Module):
 
 
         with torch.no_grad():
-            for batch in test_loader:
+            for batch in tqdm(test_loader):
                 iterations += 1
                 reconstructions = self.evaluate(batch)
 
@@ -233,7 +234,7 @@ class Vae(nn.Module):
                     current_programs['solutionId'] = current_programs['solutionId'].astype(str)
                     current_programs = current_programs.set_index('solutionId')
                     
-                    evaluator.add_eval_hypotheses(current_programs.loc[batch['ids']]['solution'])
+                    evaluator.add_eval_hypotheses(current_programs.loc[batch['ids']]['solution'], save_folder, batch['ids'])
                     evaluator.add_eval_references(reconstructions, batch['declared_names'])
 
                     evaluator.reconstructions_to_file(reconstructions, save_folder, batch['ids'])
@@ -243,8 +244,8 @@ class Vae(nn.Module):
 
                     evaluator.reconstructions_to_file(reconstructions, save_folder)
 
-                if iterations > 2:
-                    break
+                # if iterations > 500:
+                #     break
 
 
         # Get the average of the bleu scores over the entire test dataset
@@ -253,7 +254,8 @@ class Vae(nn.Module):
 
         bleu_scores = evaluator.calc_bleu_score()
 
-        perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=True)
+        # perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=False)
+        perc_compiles = 0
 
         return bleu_scores, perc_compiles
 

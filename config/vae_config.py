@@ -19,9 +19,9 @@ def get_config():
     # Standard model parameters
     num_epochs = 10
     batch_size = 32
-    learning_rate = 1e-3   
-    num_rnn_layers_enc = 1  # The number of RNN layers for the encoder (>1 gives stacked RNN)
-    num_rnn_layers_dec = 1  # The number of RNN layers for the decoder (>1 gives stacked RNN)
+    learning_rate = 1e-4   
+    num_rnn_layers_enc = 3  # The number of RNN layers for the encoder (>1 gives stacked RNN)
+    num_rnn_layers_dec = 3  # The number of RNN layers for the decoder (>1 gives stacked RNN)
     rnn_hidden_size = 300   # The hidden size of the RNN
     latent_dim = 150        # The latent vector size
     embedding_dim = 50      # The embedding dimension (if pretrained embedding is set, will automatically take that size)
@@ -29,7 +29,7 @@ def get_config():
     recurrent_dropout = 0.2   # Dropout rate for the RNN layers
     clip_grad_norm = 0      # clip the gradient norm, setting to 0 ignores this 
     clip_grad_val = 0       # clip the gradient value, setting to 0 ignores this
-    save_every = 500        # Save per X batches
+    save_every = 1000        # Save per X batches
     save_dir = 'checkpoints'
 
     # Torch data loader parameters
@@ -44,7 +44,7 @@ def get_config():
     max_program_size = 750          # Cut off last part of programs > max program size and pad the other programs to max program size
 
     # Advanced model parameters
-    pretrained_emb = None #'glove-wiki-gigaword-50'   # Pretrained embedding to use (https://github.com/RaRe-Technologies/gensim-data/blob/master/list.json)
+    pretrained_emb = 'glove-wiki-gigaword-50'   # Pretrained embedding to use (https://github.com/RaRe-Technologies/gensim-data/blob/master/list.json)
     vae = True                                  # Turning this off will revert to standard AE architecture
     use_cell_output_lstm = False                # In case of LSTM RNN, use also the cell state concatenated with the hidden state as output
     indiv_embed_layers = False                  # Use individual embedding layers for each vocab/node type
@@ -58,7 +58,7 @@ def get_config():
     kl_weight = 1                               # For constant annealing: the KL weight
     kl_ratio = 0.2                              # Ratio of total data/data in cycle used to increase kl weight to 1
     kl_function = 'linear'                      # kl scheduler increase function: linear, sinusoidal
-    kl_cycles = 8                               # For cyclical kl scheduler, how many cycles to anneal
+    kl_cycles = 16                               # For cyclical kl scheduler, how many cycles to anneal
 
 
     # Early stopping parameters
@@ -68,33 +68,33 @@ def get_config():
 
 
     # Load pretrained model
-    pretrained_model = None #'checkpoints/774/iter3000.tar'
+    pretrained_model = None #'checkpoints/cluster_latent150/7000.tar'
 
 
     # Data path parameters
     tokens_paths = {
-        # 'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
-        # 'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
-        # 'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
-        # 'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
-        # 'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
+        'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
+        'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
+        'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
+        'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
+        'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
 
 
         # For the seq2seq model
-        'ALL' : '../data/seq_data/token_counts/',
+        # 'ALL' : '../data/seq_data/token_counts/',
     }
 
     dataset_paths = {
-        # 'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
-        # 'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
-        # 'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
-        # 'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
+        'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
+        'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
+        'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
+        'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
 
 
         # For the seq2seq model
-        'TRAIN': '../data/seq_data/programs_train/',
-        'VAL': '../data/seq_data/programs_val/',
-        'TEST': '../data/seq_data/programs_test/'
+        # 'TRAIN': '../data/seq_data/programs_train/',
+        # 'VAL': '../data/seq_data/programs_val/',
+        # 'TEST': '../data/seq_data/programs_test/'
     } 
 
 
