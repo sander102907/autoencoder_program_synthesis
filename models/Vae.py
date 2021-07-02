@@ -244,8 +244,8 @@ class Vae(nn.Module):
 
                     evaluator.reconstructions_to_file(reconstructions, save_folder)
 
-                if iterations > 0:
-                    break
+                # if iterations > 0:
+                #     break
 
 
         # Get the average of the bleu scores over the entire test dataset
@@ -254,8 +254,8 @@ class Vae(nn.Module):
 
         bleu_scores = evaluator.calc_bleu_score()
 
-        perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=False)
-        # perc_compiles = 0
+        # perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=False)
+        perc_compiles = 0
 
         return bleu_scores, perc_compiles
 

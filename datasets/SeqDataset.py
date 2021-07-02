@@ -14,7 +14,7 @@ class SeqDataset(Dataset):
         """
 
         self._json_file = json_file
-        self._total_data = 500 # int(subprocess.check_output(["jq", "length", json_file], shell=False)) - 1
+        self._total_data = int(subprocess.check_output(["jq", "length", json_file], shell=False)) - 1
         self.vocabulary = vocabulary
         self.max_program_size = max_program_size
         self.device = device

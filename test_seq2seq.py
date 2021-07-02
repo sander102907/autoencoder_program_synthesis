@@ -91,6 +91,8 @@ class Tester:
     def get_datasets(self, dataset_paths, max_program_size):
         test_files = [os.path.join(dataset_paths['TEST'], file) for file in os.listdir(dataset_paths['TEST'])]
 
+        print(test_files)
+
         test_datasets = list(map(lambda x : SeqDataset(x, self.vocabulary, max_program_size, device), test_files))
         test_dataset = ConcatDataset(test_datasets)
 

@@ -82,12 +82,15 @@ class Sampling:
         """
 
         if logits.shape[0] > 0:
-            logits /= temperature
+            logits /= temperature if temperature > 0 else 1
             
             logits = cls._filter_top_k(logits, top_k)
             logits = cls._filter_top_p(logits, top_p)
 
-            return cls._get_sample(logits)
+            if temperature == 0: # greedy sampling:
+                return torch.argmax(logits, dim=-1)
+            else:
+                return cls._get_sample(logits)
         else:
             # Return empty long tensor if logits are empty
             return torch.empty(0, dtype=torch.long, device=logits.device)

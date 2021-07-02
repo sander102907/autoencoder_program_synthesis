@@ -62,9 +62,9 @@ def get_config():
 
 
     # Sampling parameters
-    temperature = 0.1
-    top_k = 40
-    top_p = 0.9
+    temperature = 0 # 0.7
+    top_k = 0 # 40
+    top_p = 0 # 0.9
 
 
     # Early stopping parameters
