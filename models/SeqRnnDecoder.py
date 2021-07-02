@@ -5,7 +5,7 @@ import torch.nn.utils.rnn as rnn_utils
 from model_utils.adaptive_softmax_pytorch import AdaptiveLogSoftmaxWithLoss
 from utils.Sampling import Sampling
 from config.vae_config import ex
-
+import time
 
 class SeqRnnDecoder(nn.Module):
     @ex.capture
@@ -66,11 +66,11 @@ class SeqRnnDecoder(nn.Module):
         self.pad_idx = vocabulary.token2index['ALL']['<pad>']
 
 
-    def forward(self, z, inp=None):
+    def forward(self, z, inp=None, temperature=None, top_k=None, top_p=None):
         if inp is not None:
             return self.forward_train(z, inp)
         else:
-            return self.forward_inference(z)
+            return self.forward_inference(z, temperature, top_k, top_p)
         
 
     def forward_train(self, z, inp):
@@ -126,7 +126,7 @@ class SeqRnnDecoder(nn.Module):
         return loss, {}, {}
 
 
-    def forward_inference(self, z):
+    def forward_inference(self, z, temperature, top_k, top_p):
         batch_size = z.shape[0]
 
         hidden = self.latent2hidden(z)
@@ -162,7 +162,7 @@ class SeqRnnDecoder(nn.Module):
 
             logits = self.loss.log_prob(output.squeeze(1))
 
-            sequence = Sampling.sample(logits, temperature=0.7, top_k=40, top_p=0.9).view(-1)
+            sequence = Sampling.sample(logits, temperature, top_k, top_p).view(-1)
 
             # Save the next sequence that will be input to the RNN
             generations = self._save_sample(generations, sequence, sequence_running, t)

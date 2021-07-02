@@ -124,14 +124,14 @@ class Tester:
 
 
     @ex.capture
-    def run(self, save_dir, _run, dataset_paths):
+    def run(self, save_dir, _run, dataset_paths, temperature, top_k, top_p):
         if save_dir is not None:
             save_dir = os.path.join(save_dir, str(_run._id))
             os.makedirs(save_dir, exist_ok=True)
 
         test_programs = pd.read_csv(dataset_paths['TEST_PROGRAMS'])
 
-        bleu_scores, perc_compiles = self.model.test(self.test_loader, test_programs=test_programs, save_folder=str(_run._id))
+        bleu_scores, perc_compiles = self.model.test(self.test_loader, temperature, top_k, top_p, save_folder=str(_run._id), test_programs=test_programs)
 
         return bleu_scores, perc_compiles
 

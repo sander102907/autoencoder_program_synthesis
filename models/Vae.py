@@ -213,7 +213,7 @@ class Vae(nn.Module):
         return iterations_passed + batch_index
 
 
-    def test(self, test_loader, save_folder=None, test_programs=None):
+    def test(self, test_loader, temperature, top_k, top_p, save_folder=None, test_programs=None):
         self.eval()
         iterations = 0
 
@@ -226,7 +226,7 @@ class Vae(nn.Module):
         with torch.no_grad():
             for batch in tqdm(test_loader):
                 iterations += 1
-                reconstructions = self.evaluate(batch)
+                reconstructions = self.evaluate(batch, temperature, top_k, top_p)
 
 
                 if self.metrics_helper == MetricsHelperTree2Tree:
@@ -244,8 +244,8 @@ class Vae(nn.Module):
 
                     evaluator.reconstructions_to_file(reconstructions, save_folder)
 
-                # if iterations > 500:
-                #     break
+                if iterations > 0:
+                    break
 
 
         # Get the average of the bleu scores over the entire test dataset
@@ -254,13 +254,13 @@ class Vae(nn.Module):
 
         bleu_scores = evaluator.calc_bleu_score()
 
-        # perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=False)
-        perc_compiles = 0
+        perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=False)
+        # perc_compiles = 0
 
         return bleu_scores, perc_compiles
 
 
-    def evaluate(self, batch):
+    def evaluate(self, batch, temperature, top_k, top_p):
         """
         Evaluates the VAE model: given data, reconstruct the input and output this
         @param data_loader: Torch Dataset that generates batches to evaluate on
@@ -275,9 +275,9 @@ class Vae(nn.Module):
         z, _ = self.encoder(batch)
 
         if self.metrics_helper == MetricsHelperTree2Tree:
-            reconstructions += self.decoder(z, target=None, names_token2index=batch['declared_names'])
+            reconstructions += self.decoder(z, target=None, names_token2index=batch['declared_names'], temperature=temperature, top_k=top_k, top_p=top_p)
         else:
-            reconstructions += self.decoder(z)
+            reconstructions += self.decoder(z, inp=None, temperature=temperature, top_k=top_k, top_p=top_p)
 
         return reconstructions
 

@@ -43,12 +43,12 @@ class Seq2SeqEvaluator:
 
         subprocess.run('for entry in ' +  f'"{code_folder}"/*' + """
             do
-            """ + f"{'#' if fix_errors else ''} clang-tidy $entry -fix-errors" + """
+            """ + f"{'#' if not fix_errors else ''} clang-tidy $entry -fix-errors" + """
             : ${entry/cpp/out} 
             g++ $entry -o  ${_/code/compiled}
-            done""", shell=True, executable='/bin/bash')
+            done""", shell=True, executable='/bin/bash', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        return len(os.listdir(code_folder)) / len(os.listdir(code_folder))
+        return len(os.listdir(compile_folder)) / len(os.listdir(code_folder))
 
 
     def add_eval_hypotheses(self, orig_programs):
@@ -68,7 +68,8 @@ class Seq2SeqEvaluator:
         imports = ['using namespace std;', '#include <vector>', '#include <iostream>', '#include <string>',
             '#include <cstring>', '#include <queue>', '#include <stdio.h>', '#include <math.h>', '#include <map>', '#include <set>', '#include <stack>']
 
-        for idx, program in enumerate(reconstructions):
+        for program in reconstructions:
+            idx = len(os.listdir(code_folder))
             program_path = os.path.join(code_folder, f'{idx}.cpp')
 
             with open(program_path, 'w') as f:
@@ -117,35 +118,19 @@ class Tree2TreeEvaluator:
             'bleu_4': self.bleu_4
         }
 
-    def calc_perc_compiles(self, folder, fix_errors=True):
+    def calc_perc_compiles(self, folder, fix_errors=False):
         code_folder = os.path.join('output', folder, 'code')
         compile_folder = os.path.join('output', folder, 'compiled')
         os.makedirs(compile_folder, exist_ok=True)
 
-        amt_compiles = 0
+        subprocess.run('for entry in ' +  f'"{code_folder}"/*' + """
+            do
+            """ + f"{'#' if not fix_errors else ''} clang-tidy $entry -fix-errors" + """
+            : ${entry/cpp/out} 
+            g++ $entry -o  ${_/code/compiled}
+            done""", shell=True, executable='/bin/bash', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        for file in tqdm(os.listdir(code_folder)):
-            program_file_path = os.path.join(code_folder, file)
-            compiled_file_path = os.path.join(compile_folder, f'{file.replace(".cpp", "")}.out')
-            
-            if fix_errors:
-                proc_fix = subprocess.Popen(['clang-tidy', program_file_path, '-fix-errors'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                # timeout after 2 seconds
-                t = Timer(2, proc_fix.kill)
-                t.start()
-                proc_fix.wait()
-
-            proc_compile = subprocess.Popen(['g++', program_file_path, '-o', compiled_file_path, '-std=c++17'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            # timeout after 2 seconds
-            t = Timer(2, proc_compile.kill)
-            t.start()
-            proc_compile.wait()
-
-            compiles = os.path.isfile(compiled_file_path)
-
-            amt_compiles += compiles
-
-        return amt_compiles / len(os.listdir(code_folder))
+        return len(os.listdir(compile_folder)) / len(os.listdir(code_folder))
 
 
 

@@ -61,6 +61,12 @@ def get_config():
     kl_cycles = 16                               # For cyclical kl scheduler, how many cycles to anneal
 
 
+    # Sampling parameters
+    temperature = 0.1
+    top_k = 40
+    top_p = 0.9
+
+
     # Early stopping parameters
     check_early_stop_every = 8000                # Update early stop loss every X batches
     early_stop_patience = 3                     # how many steps to wait before stopping when loss is not improving

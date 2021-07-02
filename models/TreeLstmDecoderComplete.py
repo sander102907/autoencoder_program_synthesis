@@ -121,7 +121,7 @@ class TreeLstmDecoderComplete(nn.Module):
                 self.label_losses[vocab_name] = nn.CrossEntropyLoss(weight=self.loss_weights[vocab_name], reduction='sum')
 
 
-    def forward(self, z, target=None, names_token2index=None):
+    def forward(self, z, target=None, names_token2index=None, temperature=None, top_k=None, top_p=None):
         """
         @param z: (batch_size, LATENT_DIM) -> latent vector(s)
 
@@ -192,7 +192,7 @@ class TreeLstmDecoderComplete(nn.Module):
 
          # We are evaluating and we cannot use training forcing and we generate tree by tree
         elif names_token2index is not None:
-            trees = self.start_decode_eval(z, names_token2index)
+            trees = self.start_decode_eval(z, names_token2index, temperature, top_k, top_p)
             return trees
 
 
@@ -457,7 +457,7 @@ class TreeLstmDecoderComplete(nn.Module):
             c_s[idx][state_mask] = s_state[1]
 
 
-    def start_decode_eval(self, z, names_token2index):
+    def start_decode_eval(self, z, names_token2index, temperature, top_k, top_p):
         names_index2token = []
 
         hidden = self.latent2hidden(z)            
@@ -484,12 +484,25 @@ class TreeLstmDecoderComplete(nn.Module):
         parent_state = [(h_parent, c_parent) for _ in range(self.num_rnn_layers_dec)]
         sibling_state = [(rnn_empty_init, rnn_empty_init) for _ in range(self.num_rnn_layers_dec)]
 
-        trees = self.decode_eval(parent_state, sibling_state, names_index2token, name_eval_nodes)
+        trees = self.decode_eval(parent_state, sibling_state, names_index2token, name_eval_nodes, temperature, top_k, top_p)
 
         return trees
 
 
-    def decode_eval(self, parent_state, sibling_state, names_index2token, name_eval_nodes, parent_nodes=None, declared_names=None, program_ids=None, sibling_path_offsets=None, iteration=0):
+    def decode_eval(self,
+                    parent_state, 
+                    sibling_state, 
+                    names_index2token, 
+                    name_eval_nodes,
+                    temperature,
+                    top_k,
+                    top_p, 
+                    parent_nodes=None, 
+                    declared_names=None, 
+                    program_ids=None, 
+                    sibling_path_offsets=None, 
+                    iteration=0):
+
         if iteration > 50 and not name_eval_nodes.processing_names:
             print(f'Stopped due to recursion level going over {iteration} iterations')
             return parent_nodes
@@ -520,7 +533,15 @@ class TreeLstmDecoderComplete(nn.Module):
 
 
             # Pass new parent state and no sibling state as we start with the first sibling
-            self.decode_eval(parent_state, sibling_state, names_index2token, name_eval_nodes, parent_nodes, declared_names, program_ids, sibling_path_offsets)
+            self.decode_eval(parent_state, 
+                            sibling_state, 
+                            names_index2token, 
+                            name_eval_nodes, 
+                            temperature, top_k, 
+                            top_p, parent_nodes, 
+                            declared_names, 
+                            program_ids, 
+                            sibling_path_offsets)
 
         else:
             h_parent, c_parent = parent_state[-1]
@@ -611,11 +632,10 @@ class TreeLstmDecoderComplete(nn.Module):
 
             predicted_labels = torch.zeros(batch_size, dtype=torch.long, device=self.device)
 
-
-            predicted_labels[is_res] = Sampling.sample(label_logits_res, temperature=0.7, top_k=40, top_p=0.9).view(-1)
-            predicted_labels[type_indices] = Sampling.sample(label_logits_type, temperature=0.7, top_k=40, top_p=0.9).view(-1)
-            predicted_labels[name_builtin_indices] = Sampling.sample(label_logits_name_builtin, temperature=0.7, top_k=40, top_p=0.9).view(-1)
-            predicted_labels[literal_indices] = Sampling.sample(label_logits_literal, temperature=0.7, top_k=40, top_p=0.9).view(-1)
+            predicted_labels[is_res] = Sampling.sample(label_logits_res, temperature, top_k, top_p).view(-1)
+            predicted_labels[type_indices] = Sampling.sample(label_logits_type, temperature, top_k, top_p).view(-1)
+            predicted_labels[name_builtin_indices] = Sampling.sample(label_logits_name_builtin, temperature, top_k, top_p).view(-1)
+            predicted_labels[literal_indices] = Sampling.sample(label_logits_literal, temperature, top_k, top_p).view(-1)
 
             predicted_name_labels = []
 
@@ -839,12 +859,34 @@ class TreeLstmDecoderComplete(nn.Module):
                 name_eval_nodes.add_nodes(total_parent_state_names, total_sibling_state_names, names_index2token_names, parent_nodes_names, program_ids_names, sibling_path_offsets_names)
 
                 if len(parent_nodes) > 0:
-                    self.decode_eval(total_parent_state, total_sibling_state, names_index2token, name_eval_nodes, parent_nodes, declared_names, program_ids, sibling_path_offsets, iteration + 1)
+                    self.decode_eval(total_parent_state, 
+                                    total_sibling_state, 
+                                    names_index2token, 
+                                    name_eval_nodes, 
+                                    temperature, 
+                                    top_k, 
+                                    top_p, 
+                                    parent_nodes, 
+                                    declared_names, 
+                                    program_ids, 
+                                    sibling_path_offsets, 
+                                    iteration + 1)
 
             if not name_eval_nodes.is_empty():
                 total_parent_state, total_sibling_state, names_index2token, parent_nodes, program_ids, sibling_path_offsets = name_eval_nodes.get_next()
 
-                self.decode_eval(total_parent_state, total_sibling_state, names_index2token, name_eval_nodes, parent_nodes, declared_names, program_ids, sibling_path_offsets, iteration + 1)
+                self.decode_eval(total_parent_state, 
+                                total_sibling_state, 
+                                names_index2token, 
+                                name_eval_nodes, 
+                                temperature, 
+                                top_k, 
+                                top_p, 
+                                parent_nodes, 
+                                declared_names, 
+                                program_ids, 
+                                sibling_path_offsets, 
+                                iteration + 1)
 
 
         # If we are done, return the parent nodes (which contain the entire trees)
