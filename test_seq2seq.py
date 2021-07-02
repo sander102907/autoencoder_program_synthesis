@@ -1,0 +1,153 @@
+from models.SeqRnnEncoder import SeqRnnEncoder
+from models.Vae import Vae
+from datasets.SeqDataset import SeqDataset
+import os
+import torch
+from torch.utils.data import DataLoader, ConcatDataset
+import json
+from model_utils.vocabulary import Vocabulary
+from config.vae_config import ex
+from models.SeqRnnEncoder import SeqRnnEncoder
+from models.SeqRnnDecoder import SeqRnnDecoder
+from model_utils.metrics_helper import MetricsHelperSeq2Seq
+
+
+# Device configuration
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+@ex.config
+def set_config():
+    pretrained_model = '../vastai/168_150latent_seq2seq/model.tar'
+
+    folder = os.path.dirname(pretrained_model)
+    
+    for file in os.listdir(folder):
+        if 'config' in file and file.endswith('json'):
+            ex.add_config(os.path.join(folder, file))
+
+
+    # Overwrite config pretrained model
+    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 32})
+
+
+class Tester:
+    def __init__(self):
+        self.vocabulary = self.get_vocabulary()
+        self.add_special_vocab_tokens()
+        self.loss_weights = self.get_loss_weights()
+        self.model = self.make_model()
+        self.load_model()
+        self.test_dataset = self.get_datasets()
+        self.test_loader = self.get_dataloaders()
+
+
+
+    @ex.capture
+    def make_model(self):
+        model = Vae(device, 
+                    SeqRnnEncoder, 
+                    SeqRnnDecoder, 
+                    self.vocabulary, 
+                    MetricsHelperSeq2Seq, 
+                    self.loss_weights
+                    ).to(device)
+
+        return model
+
+
+    @ex.capture
+    def load_model(self, pretrained_model):
+        if pretrained_model is not None and os.path.isfile(pretrained_model):
+            self.model.load_model(pretrained_model)
+
+
+    @ex.capture
+    def get_vocabulary(self, tokens_paths):
+        max_tokens = {
+            'ALL': None
+        }
+
+        tokens_paths = {'ALL': tokens_paths['ALL']}
+
+        vocabulary = Vocabulary(tokens_paths, max_tokens)
+
+        return vocabulary        
+
+    @ex.capture
+    def get_loss_weights(self, weighted_loss):
+        loss_weights = {}
+
+        for vocab_type, token_counts in self.vocabulary.token_counts.items():
+            if weighted_loss:
+                counts = torch.tensor(list(token_counts.values())[:self.vocabulary.get_vocab_size(vocab_type)])
+                loss_weights[vocab_type] = (torch.min(counts, dim=-1)[0] / counts) * torch.max(counts, dim=-1)[0]
+            else:
+                loss_weights[vocab_type] = torch.ones(self.vocabulary.get_vocab_size(vocab_type))
+
+        return loss_weights
+
+
+    @ex.capture
+    def get_datasets(self, dataset_paths, max_program_size):
+        test_files = [os.path.join(dataset_paths['TEST'], file) for file in os.listdir(dataset_paths['TEST'])]
+
+        test_datasets = list(map(lambda x : SeqDataset(x, self.vocabulary, max_program_size, device), test_files))
+        test_dataset = ConcatDataset(test_datasets)
+
+        return test_dataset
+
+
+    @ex.capture
+    def get_dataloaders(self, batch_size, num_workers):
+        test_loader = DataLoader(
+            self.test_dataset,
+            batch_size=batch_size,
+            num_workers=num_workers)
+
+        
+        return test_loader
+
+
+    def add_special_vocab_tokens(self):
+        self.vocabulary.add_new_token('ALL', '<pad>')
+        self.vocabulary.add_new_token('ALL', '<unk>')
+        self.vocabulary.add_new_token('ALL', '<sos>')
+        self.vocabulary.add_new_token('ALL', '<eos>')
+
+
+
+
+    @ex.capture
+    def save_config(self, save_dir, _config):
+        config_path = os.path.join(save_dir, 'config.json')
+
+        with open(config_path, 'w') as f:
+            json.dump(_config, f)
+
+
+
+    @ex.capture
+    def run(self, save_dir, _run, temperature, top_k, top_p):
+        if save_dir is not None:
+            save_dir = os.path.join(save_dir, str(_run._id))
+            os.makedirs(save_dir, exist_ok=True)
+            self.save_config(save_dir)
+            
+
+        bleu_scores, perc_compiles = self.model.test(self.test_loader, temperature, top_k, top_p, save_folder=str(_run._id))       
+
+        return bleu_scores, perc_compiles
+
+
+@ex.main
+def main(pretrained_model):
+    # pretrained model should be given
+    assert pretrained_model is not None and os.path.isfile(pretrained_model)
+
+    tester = Tester()
+    bleu_scores, perc_compiles = tester.run()
+
+    return {'bleu scores': bleu_scores, 'percentage compiles': perc_compiles}
+
+if __name__ == "__main__":
+    ex.run_commandline()
