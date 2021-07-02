@@ -304,12 +304,12 @@ class TreeLstmDecoderComplete(nn.Module):
             individual_losses['SIBLING'] += sibling_loss.item()
             individual_losses['IS_RES'] += res_loss.item()
 
-            accuracies['PARENT'] += sum(
+            accuracies['PARENT'] += torch.sum(
                 (self.sigmoid(depth_pred) >= 0.5) == (is_parent == 1)).item()
-            accuracies['SIBLING'] += sum(
+            accuracies['SIBLING'] += torch.sum(
                 (self.sigmoid(width_pred) >= 0.5) == (has_sibling == 1)).item()
 
-            accuracies['IS_RES'] += sum(
+            accuracies['IS_RES'] += torch.sum(
                 (self.sigmoid(res_pred) >= 0.5) == (is_res == 1)).item()
 
             label = features[node_mask].long()
@@ -326,7 +326,7 @@ class TreeLstmDecoderComplete(nn.Module):
                         label_pred, label_loss = self.label_losses[k](
                             h_pred[vocabs[node_mask] == k], label[vocabs[node_mask] == k].view(-1))
 
-                        accuracies[k] += sum(self.label_losses[k].predict(h_pred[vocabs[node_mask] == k])
+                        accuracies[k] += torch.sum(self.label_losses[k].predict(h_pred[vocabs[node_mask] == k])
                                             == label[vocabs[node_mask] == k].view(-1)).item()
 
 
@@ -386,7 +386,7 @@ class TreeLstmDecoderComplete(nn.Module):
                                                         ), label[vocabs[node_mask] == k].view(-1)) # / sum(tree_state.vocabs == k)
 
 
-                        accuracies[k] += sum(torch.argmax(self.softmax(label_pred
+                        accuracies[k] += torch.sum(torch.argmax(self.softmax(label_pred
                                                                     # + self.offset_parent(is_parent[vocabs_mask == k])
                                                                     # + self.offset_sibling(has_sibling[vocabs_mask == k])
                                                                     ), dim=-1) == label[vocabs[node_mask] == k].view(-1)).item()
