@@ -312,7 +312,7 @@ class AstDataset(IterableDataset):
         node_order_bottomup, edge_order_bottomup = calculate_evaluation_orders(
             adjacency_list, len(features))
         node_order_topdown, edge_order_topdown, edge_order_topdown_sib = calculate_evaluation_orders_topdown(
-            adjacency_list, adjacency_list_sib, len(features))
+            adjacency_list, adjacency_list_sib, len(features), vocabs)
 
         return {
             'features': torch.tensor(features, dtype=torch.int32),
