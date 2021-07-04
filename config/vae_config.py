@@ -4,7 +4,7 @@ from sacred.observers import MongoObserver
 EXPERIMENT_NAME = 'Experiment'
 DATABASE_NAME = 'Autoencoder_program_synthesis'
 URL = f'mongodb+srv://sander:9AqrPVfuPJuv0ajP@cluster0.b2wvr.mongodb.net/{DATABASE_NAME}?retryWrites=true&w=majority'
-URL = None
+# URL = None
 
 ex = Experiment(EXPERIMENT_NAME)
 
