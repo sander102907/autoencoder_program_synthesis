@@ -144,7 +144,7 @@ class Vae(nn.Module):
                                             individual_losses, accuracies, kl_weight, batch['vocabs'], _run)
                 self.metrics_helper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
                                                 individual_losses, accuracies, kl_weight, batch['vocabs'])
-            else:
+            elif current_iteration % 10 == 10 - 1:
                 self.metrics_helper.log_to_sacred(self.training, current_iteration, loss, kl_loss, reconstruction_loss,
                                                   kl_weight, 750, _run)
                 self.metrics_helper.update_model_metrics(self.training, current_iteration, self.metrics, loss,  kl_loss, reconstruction_loss,
