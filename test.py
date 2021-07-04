@@ -45,7 +45,7 @@ def set_config():
 
 
     # Overwrite config pretrained model
-    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 32})
+    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 8})
 
 
 class Tester:

@@ -1,28 +1,30 @@
 import json
 import os
 import re
+import math
 
 class Vocabulary:
-    def __init__(self, paths, max_tokens):
+    def __init__(self, paths, max_tokens, add_special_tokens=False):
         self.token_counts = {}
         self.token2index = {}
         self.index2token = {}
         # self.offsets = {}
 
+
         self.max_tokens = max_tokens
 
         for name, path in paths.items():
-            self.load_token_counts(path, name)
+            self.load_token_counts(path, name, add_special_tokens)
 
         # self.token_counts['ALL'] = {k:v for k,v in self.token_counts['ALL'].items() if v > 50}
 
         self.create_tokens()
 
         if not 'ALL' in paths.keys():
-            self.create_combined_vocabs()
+            self.create_combined_vocabs()        
         
 
-    def load_token_counts(self, path, name):
+    def load_token_counts(self, path, name, add_special_tokens):
         self.token_counts[name] = {}
         
         # self.offsets[name] = 0
@@ -33,6 +35,12 @@ class Vocabulary:
         #         self.offsets[name] += min(len(self.token_counts[k]), self.max_tokens[k])
         #     else:
         #         self.offsets[name] += len(self.token_counts[k])
+
+        if add_special_tokens:
+            self.token_counts[name]['<pad>'] = math.inf
+            self.token_counts[name]['<unk>'] = math.inf
+            self.token_counts[name]['<sos>'] = math.inf
+            self.token_counts[name]['<eos>'] = math.inf
 
 
         # If path is a file
@@ -97,10 +105,11 @@ class Vocabulary:
         return len(self.token2index[name])
 
 
-    def add_new_token(self, name, token):
-        index = len(self.token2index[name])
-        self.token2index[name][token] = index
-        self.index2token[name][index] = token
+    def add_new_token(self, name, token, index=None):
+        if index is None:
+            index = len(self.token2index[name])
+            self.token2index[name][token] = index
+            self.index2token[name][index] = token
 
         if name != 'ALL':
             index_all = len(self.token2index['ALL'])

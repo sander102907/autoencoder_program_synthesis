@@ -4,7 +4,7 @@ from sacred.observers import MongoObserver
 EXPERIMENT_NAME = 'Experiment'
 DATABASE_NAME = 'Autoencoder_program_synthesis'
 URL = f'mongodb+srv://sander:9AqrPVfuPJuv0ajP@cluster0.b2wvr.mongodb.net/{DATABASE_NAME}?retryWrites=true&w=majority'
-# URL = None
+URL = None
 
 ex = Experiment(EXPERIMENT_NAME)
 
@@ -18,10 +18,10 @@ def get_config():
 
     # Standard model parameters
     num_epochs = 10
-    batch_size = 32
+    batch_size = 8
     learning_rate = 1e-4   
-    num_rnn_layers_enc = 3  # The number of RNN layers for the encoder (>1 gives stacked RNN)
-    num_rnn_layers_dec = 3  # The number of RNN layers for the decoder (>1 gives stacked RNN)
+    num_rnn_layers_enc = 1  # The number of RNN layers for the encoder (>1 gives stacked RNN)
+    num_rnn_layers_dec = 1  # The number of RNN layers for the decoder (>1 gives stacked RNN)
     rnn_hidden_size = 300   # The hidden size of the RNN
     latent_dim = 150        # The latent vector size
     embedding_dim = 50      # The embedding dimension (if pretrained embedding is set, will automatically take that size)
@@ -29,7 +29,7 @@ def get_config():
     recurrent_dropout = 0.2   # Dropout rate for the RNN layers
     clip_grad_norm = 0      # clip the gradient norm, setting to 0 ignores this 
     clip_grad_val = 0       # clip the gradient value, setting to 0 ignores this
-    save_every = 1000        # Save per X batches
+    save_every = 10000        # Save per X batches
     save_dir = 'checkpoints'
 
     # Torch data loader parameters
@@ -40,11 +40,14 @@ def get_config():
     max_name_tokens = 0             # Only use the most frequent max name tokens
     reusable_name_tokens = 150      # The rest of the name tokens are indexed to reusable ID's
 
-    # Sequence data parameters
+    # Seq2seq parameters
     max_program_size = 750          # Cut off last part of programs > max program size and pad the other programs to max program size
+    rnn_encoder_bidirectional = False
+    rnn_type = 'gru'
+    word_dropout = 0.2
 
     # Advanced model parameters
-    pretrained_emb = 'glove-wiki-gigaword-50'   # Pretrained embedding to use (https://github.com/RaRe-Technologies/gensim-data/blob/master/list.json)
+    pretrained_emb = None #'glove-wiki-gigaword-50'   # Pretrained embedding to use (https://github.com/RaRe-Technologies/gensim-data/blob/master/list.json)
     vae = True                                  # Turning this off will revert to standard AE architecture
     use_cell_output_lstm = False                # In case of LSTM RNN, use also the cell state concatenated with the hidden state as output
     indiv_embed_layers = False                  # Use individual embedding layers for each vocab/node type
@@ -68,7 +71,7 @@ def get_config():
 
 
     # Early stopping parameters
-    check_early_stop_every = 8000                # Update early stop loss every X batches
+    check_early_stop_every = 32000                # Update early stop loss every X batches
     early_stop_patience = 3                     # how many steps to wait before stopping when loss is not improving
     early_stop_min_delta = 0                    # minimum difference between new loss and old loss for new loss to be considered as an improvement
 
@@ -79,28 +82,28 @@ def get_config():
 
     # Data path parameters
     tokens_paths = {
-        'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
-        'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
-        'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
-        'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
-        'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
+        # 'NAME': '../data/ast_trees_full_19-06-2021/name_tokens/',
+        # 'NAME_BUILTIN': '../data/ast_trees_full_19-06-2021/name_builtin_tokens/',
+        # 'RES': '../data/ast_trees_full_19-06-2021/reserved_tokens/',
+        # 'TYPE': '../data/ast_trees_full_19-06-2021/type_tokens/',
+        # 'LITERAL': '../data/ast_trees_full_19-06-2021/literal_tokens/',
 
 
         # For the seq2seq model
-        # 'ALL' : '../data/seq_data/token_counts/',
+        'ALL' : '../data/seq_data/token_counts/',
     }
 
     dataset_paths = {
-        'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
-        'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
-        'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
-        'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
+        # 'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
+        # 'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
+        # 'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
+        # 'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
 
 
         # For the seq2seq model
-        # 'TRAIN': '../data/seq_data/programs_train/',
-        # 'VAL': '../data/seq_data/programs_val/',
-        # 'TEST': '../data/seq_data/programs_test/'
+        'TRAIN': '../data/seq_data/programs_train/',
+        'VAL': '../data/seq_data/programs_val/',
+        'TEST': '../data/seq_data/programs_test/'
     } 
 
 

@@ -28,7 +28,6 @@ class Vae(nn.Module):
 
         self.encoder = encoder(device, self.embedding_layers)
         self.decoder = decoder(device, self.embedding_layers, vocabulary, loss_weights)
-        # self.encoder = TreeSeqRnnEncoder(device, params, self.embedding_layers).to(device)
 
         # Store losses -> so we can easily save them
         self.metrics = {}
@@ -126,7 +125,7 @@ class Vae(nn.Module):
 
             kl_loss, reconstruction_loss, individual_losses, accuracies = self(batch)
 
-            loss = kl_loss * kl_weight + reconstruction_loss
+            loss = (kl_loss * kl_weight + reconstruction_loss) / len(batch['input'])
 
             loss.backward()
 
@@ -246,11 +245,6 @@ class Vae(nn.Module):
 
                 # if iterations > 0:
                 #     break
-
-
-        # Get the average of the bleu scores over the entire test dataset
-        # for key in avg_tree_bleu_scores.keys():
-        #     avg_tree_bleu_scores[key] /= iterations
 
         bleu_scores = evaluator.calc_bleu_score()
 

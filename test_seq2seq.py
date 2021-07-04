@@ -17,7 +17,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 @ex.config
 def set_config():
-    pretrained_model = '../vastai/168_150latent_seq2seq/model.tar'
+    pretrained_model = 'checkpoints/1084/iter1000.tar' #'../vastai/168_150latent_seq2seq/model.tar'
 
     folder = os.path.dirname(pretrained_model)
     
@@ -27,13 +27,12 @@ def set_config():
 
 
     # Overwrite config pretrained model
-    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 32})
+    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 2})
 
 
 class Tester:
     def __init__(self):
         self.vocabulary = self.get_vocabulary()
-        self.add_special_vocab_tokens()
         self.loss_weights = self.get_loss_weights()
         self.model = self.make_model()
         self.load_model()
@@ -69,7 +68,7 @@ class Tester:
 
         tokens_paths = {'ALL': tokens_paths['ALL']}
 
-        vocabulary = Vocabulary(tokens_paths, max_tokens)
+        vocabulary = Vocabulary(tokens_paths, max_tokens, add_special_tokens=True)
 
         return vocabulary        
 
@@ -91,8 +90,6 @@ class Tester:
     def get_datasets(self, dataset_paths, max_program_size):
         test_files = [os.path.join(dataset_paths['TEST'], file) for file in os.listdir(dataset_paths['TEST'])]
 
-        print(test_files)
-
         test_datasets = list(map(lambda x : SeqDataset(x, self.vocabulary, max_program_size, device), test_files))
         test_dataset = ConcatDataset(test_datasets)
 
@@ -108,14 +105,6 @@ class Tester:
 
         
         return test_loader
-
-
-    def add_special_vocab_tokens(self):
-        self.vocabulary.add_new_token('ALL', '<pad>')
-        self.vocabulary.add_new_token('ALL', '<unk>')
-        self.vocabulary.add_new_token('ALL', '<sos>')
-        self.vocabulary.add_new_token('ALL', '<eos>')
-
 
 
 

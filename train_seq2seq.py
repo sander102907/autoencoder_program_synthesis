@@ -11,7 +11,6 @@ import json
 from model_utils.vocabulary import Vocabulary
 from torch import optim
 from config.vae_config import ex
-from random import sample
 from models.SeqRnnEncoder import SeqRnnEncoder
 from models.SeqRnnDecoder import SeqRnnDecoder
 from model_utils.metrics_helper import MetricsHelperSeq2Seq
@@ -24,16 +23,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Trainer:
     def __init__(self):
         self.vocabulary = self.get_vocabulary()
-        self.add_special_vocab_tokens()
         self.loss_weights = self.get_loss_weights()
-        print('making model')
         self.model = self.make_model()
         self.set_optimizer()
         self.load_model()
-        print('making datasets')
         self.train_dataset, self.val_dataset, self.test_dataset = self.get_datasets()
         self.train_loader, self.val_loader, self.test_loader = self.get_dataloaders()
-        print('getting scheduler')
         self.kl_scheduler = self.get_kl_scheduler()
 
 
@@ -61,7 +56,7 @@ class Trainer:
             'ALL': None
         }
 
-        vocabulary = Vocabulary(tokens_paths, max_tokens)
+        vocabulary = Vocabulary(tokens_paths, max_tokens, add_special_tokens=True)
 
         return vocabulary        
 
@@ -81,10 +76,6 @@ class Trainer:
 
     @ex.capture
     def get_datasets(self, dataset_paths, max_program_size):
-        # files = set(os.path.join(dataset_path, file) for file in os.listdir(dataset_path) if 'programs' in file)
-
-        # train_files, val_files, test_files = self.create_train_val_test_split(files)
-
         train_files = [os.path.join(dataset_paths['TRAIN'], file) for file in os.listdir(dataset_paths['TRAIN'])]
         val_files = [os.path.join(dataset_paths['VAL'], file) for file in os.listdir(dataset_paths['VAL'])]
         test_files = [os.path.join(dataset_paths['TEST'], file) for file in os.listdir(dataset_paths['TEST'])]
@@ -100,19 +91,7 @@ class Trainer:
 
         self.num_train_programs = sum([len(dset) for dset in train_datasets])
 
-        return train_dataset, val_dataset, test_dataset
-
-
-    def create_train_val_test_split(self, files, val_test_files=13):
-        test_files = sample(files, val_test_files)
-        
-        files = files - set(test_files)
-
-        val_files = sample(files, val_test_files)
-
-        train_files = files - set(val_files)
-
-        return train_files, val_files, test_files
+        return train_dataset, val_dataset, test_dataset   
 
 
     @ex.capture
@@ -151,14 +130,6 @@ class Trainer:
         elif kl_scheduling == 'cyclical':
             iterations = math.ceil((self.num_train_programs / batch_size) * num_epochs)
             return KLScheduling.CyclicalAnnealing(iterations, kl_warmup_iters, kl_cycles, kl_ratio, kl_function)
-
-
-    def add_special_vocab_tokens(self):
-        self.vocabulary.add_new_token('ALL', '<pad>')
-        self.vocabulary.add_new_token('ALL', '<unk>')
-        self.vocabulary.add_new_token('ALL', '<sos>')
-        self.vocabulary.add_new_token('ALL', '<eos>')
-
 
 
 

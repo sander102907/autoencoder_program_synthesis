@@ -1,5 +1,4 @@
 import torch
-from torch._C import device
 import torch.nn as nn
 import torch.nn.utils.rnn as rnn_utils
 from model_utils.adaptive_softmax_pytorch import AdaptiveLogSoftmaxWithLoss
@@ -19,51 +18,57 @@ class SeqRnnDecoder(nn.Module):
                 latent_dim,
                 num_rnn_layers_dec,
                 recurrent_dropout,
-                bidirectional=False,
-                max_sequence_length=1500):
+                max_program_size,
+                word_dropout=0.25,
+                rnn_type='lstm',
+                ):
 
         super().__init__()
 
         self.device = device
         self.latent_dim = latent_dim
-        self.bidirectional = bidirectional
         self.num_rnn_layers = num_rnn_layers_dec
         self.rnn_hidden_size = rnn_hidden_size
-        self.max_sequence_length = max_sequence_length
+        self.max_program_size = max_program_size
         self.vocab_size = vocabulary.get_vocab_size('ALL')
+        self.rnn_type = rnn_type
+        self.word_dropout = word_dropout # replace percentage of tokens with unk token to make model depend more on latent variable
         print(self.vocab_size)
 
         self.embedding_layer = embedding_layers['ALL']
 
-        self.rnn = nn.RNN(embedding_dim,
+        if rnn_type == 'rnn':
+            rnn = nn.RNN
+        elif rnn_type == 'gru':
+            rnn = nn.GRU
+        elif rnn_type == 'lstm':
+            rnn = nn.LSTM
+
+        self.rnn = rnn(embedding_dim,
                           rnn_hidden_size,
                           num_layers=num_rnn_layers_dec, 
-                          bidirectional=bidirectional, 
                           batch_first=True, 
                           dropout=recurrent_dropout)
 
-        self.hidden_factor = (2 if bidirectional else 1) * num_rnn_layers_dec
+        self.hidden_factor = num_rnn_layers_dec
 
         self.latent2hidden = nn.Linear(latent_dim, rnn_hidden_size * self.hidden_factor)
 
 
         # Adaptive softmax loss does not need prediction layer, much faster approach
         # for calculating softmax with highly imbalanced vocabs
-        # cutoffs: 30: 70.1%, 31-100: 18.0%, 101-1000: 9.3%, rest: 2.6%
+        # cutoffs: 100: 90.2%, 101-1000: 7.9%, 1001-10000: 1.3%, rest: 0.4%
         self.loss = AdaptiveLogSoftmaxWithLoss(
                                             self.rnn_hidden_size,
                                             self.vocab_size,
-                                            cutoffs=[30, 100, 1000],
-                                            div_value=4.0)
-
-        # self.prediction_layer = nn.Linear(rnn_hidden_size * (2 if bidirectional else 1), self.vocab_size)
-
-        # self.loss = nn.CrossEntropyLoss(reduction='sum')
+                                            cutoffs=[100, 1000, 10000],
+                                            div_value=2.0)
 
 
         self.sos_idx = vocabulary.token2index['ALL']['<sos>']
         self.eos_idx = vocabulary.token2index['ALL']['<eos>']
         self.pad_idx = vocabulary.token2index['ALL']['<pad>']
+        self.unk_idx = vocabulary.token2index['ALL']['<unk>']
 
 
     def forward(self, z, inp=None, temperature=None, top_k=None, top_p=None):
@@ -84,11 +89,23 @@ class SeqRnnDecoder(nn.Module):
 
         hidden = self.latent2hidden(z)
 
-        if self.bidirectional or self.num_rnn_layers > 1:
+        if self.num_rnn_layers > 1:
             # Unflatten the hidden state
             hidden = hidden.view(self.hidden_factor, batch_size, self.rnn_hidden_size)
         else:
             hidden = hidden.unsqueeze(0)
+
+        if self.rnn_type == 'lstm':
+            cell = torch.zeros((self.hidden_factor, batch_size, self.rnn_hidden_size), device=self.device)
+            hidden = (hidden, cell)
+
+
+        if self.word_dropout > 0 and self.training:
+            # randomly replace decoder input with <unk>
+            prob = torch.rand(inp_seq.size(), device=self.device)
+            prob[(inp_seq.data - self.sos_idx) * (inp_seq.data - self.pad_idx) == 0] = 1
+            inp_seq[prob < self.word_dropout] = self.unk_idx
+
 
         inp_emb = self.embedding_layer(inp_seq)
 
@@ -103,18 +120,13 @@ class SeqRnnDecoder(nn.Module):
         padded_outputs = padded_outputs[reversed_idx]
         _,s,_ = padded_outputs.size()
 
-
-        # Get predictions
-        # logits = self.prediction_layer(padded_outputs.view(-1, padded_outputs.size(2)))
-        # loss = self.loss(logits)
-
         # cut-off unnessary padding from target and flatten
         target_seq = target_seq[:, :s].contiguous().view(-1)
 
         # "flatten" output as well to (B * max_seq_len, hidden_size)
         padded_outputs = padded_outputs.view(-1, self.rnn_hidden_size)
 
-        _, loss = self.loss(padded_outputs, target_seq)
+        outputs, loss = self.loss(padded_outputs, target_seq)
 
         # We do not want to punish the model for predicting padding incorrectly
         # Therefore we set the loss for the paddings to 0
@@ -131,11 +143,15 @@ class SeqRnnDecoder(nn.Module):
 
         hidden = self.latent2hidden(z)
 
-        if self.bidirectional or self.num_rnn_layers > 1:
+        if self.num_rnn_layers > 1:
             # Unflatten the hidden state
             hidden = hidden.view(self.hidden_factor, batch_size, self.rnn_hidden_size)
         else:
             hidden = hidden.unsqueeze(0)
+
+        if self.rnn_type == 'lstm':
+            cell = torch.zeros((self.hidden_factor, batch_size, self.rnn_hidden_size), device=self.device)
+            hidden = (hidden, cell)
 
         
          # required for dynamic stopping of sentence generation
@@ -146,10 +162,10 @@ class SeqRnnDecoder(nn.Module):
         # idx of still generating sequences with respect to current loop
         running_seqs = torch.arange(0, batch_size, device=self.device, dtype=torch.long)
 
-        generations = torch.full(fill_value=self.pad_idx, size=(batch_size, self.max_sequence_length), device=self.device, dtype=torch.long)
+        generations = torch.full(fill_value=self.pad_idx, size=(batch_size, self.max_program_size), device=self.device, dtype=torch.long)
 
         t = 0
-        while t < self.max_sequence_length and len(running_seqs) > 0:
+        while t < self.max_program_size and len(running_seqs) > 0:
 
             if t == 0:
                 sequence = torch.full(size=(batch_size,), fill_value=self.sos_idx, dtype=torch.long, device=self.device)
@@ -168,7 +184,7 @@ class SeqRnnDecoder(nn.Module):
             generations = self._save_sample(generations, sequence, sequence_running, t)
 
 
-            # update gloabl running sequence
+            # update global running sequence
             sequence_mask[sequence_running] = (sequence != self.eos_idx)
             sequence_running = sequence_idx.masked_select(sequence_mask)
 
@@ -179,7 +195,11 @@ class SeqRnnDecoder(nn.Module):
             # prune input and hidden state according to local update
             if len(running_seqs) > 0:
                 sequence = sequence[running_seqs]
-                hidden = hidden[:, running_seqs]
+
+                if self.rnn_type == 'lstm':
+                    hidden = (hidden[0][:, running_seqs], hidden[1][:, running_seqs])
+                else:
+                    hidden = hidden[:, running_seqs]
 
                 running_seqs = torch.arange(0, len(running_seqs), device=self.device, dtype=torch.long)
 
