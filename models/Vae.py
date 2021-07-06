@@ -243,7 +243,7 @@ class Vae(nn.Module):
 
                     evaluator.reconstructions_to_file(reconstructions, save_folder)
 
-                # if iterations > 0:
+                # if iterations > 10:
                 #     break
 
         bleu_scores = evaluator.calc_bleu_score()
@@ -269,14 +269,14 @@ class Vae(nn.Module):
         z, _ = self.encoder(batch)
 
         if self.metrics_helper == MetricsHelperTree2Tree:
-            reconstructions += self.decoder(z, target=None, names_token2index=batch['declared_names'], temperature=temperature, top_k=top_k, top_p=top_p)
+            reconstructions += self.decoder(z, inp=None, names_token2index=batch['declared_names'], temperature=temperature, top_k=top_k, top_p=top_p)
         else:
             reconstructions += self.decoder(z, inp=None, temperature=temperature, top_k=top_k, top_p=top_p)
 
         return reconstructions
 
 
-    def generate(self, z):
+    def generate(self, z, save_folder, temperature, top_k, top_p):
         """
         Generate using the VAE model: given latent vector(s) z, generate output
         @param z: latent vector(s) -> (batch_size, latent_size)
@@ -285,7 +285,14 @@ class Vae(nn.Module):
         self.eval()
 
         with torch.no_grad():
-            output = self.decoder(z, target=None)
+            output = self.decoder(z, inp=None, temperature=temperature, top_k=top_k, top_p=top_p)
+
+        if self.metrics_helper == MetricsHelperTree2Tree:
+            pass
+        else:
+            evaluator = Seq2SeqEvaluator(self.vocabulary)
+            evaluator.generations_to_file(output, save_folder)
+            
 
         return output
 

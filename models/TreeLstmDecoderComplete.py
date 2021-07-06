@@ -121,7 +121,7 @@ class TreeLstmDecoderComplete(nn.Module):
                 self.label_losses[vocab_name] = nn.CrossEntropyLoss(weight=self.loss_weights[vocab_name], reduction='sum')
 
 
-    def forward(self, z, target=None, names_token2index=None, temperature=None, top_k=None, top_p=None):
+    def forward(self, z, inp=None, names_token2index=None, temperature=None, top_k=None, top_p=None):
         """
         @param z: (batch_size, LATENT_DIM) -> latent vector(s)
 
@@ -132,7 +132,7 @@ class TreeLstmDecoderComplete(nn.Module):
         """
 
         # We are training and we can do teacher forcing and batch processing
-        if target is not None:
+        if inp is not None:
             # Keep track of the loss
             total_loss = torch.tensor(0, dtype=torch.float32, device=self.device)
             individual_losses = {}
@@ -144,7 +144,7 @@ class TreeLstmDecoderComplete(nn.Module):
                 individual_losses[loss_type] = 0
                 accuracies[loss_type] = 0
 
-            node_order = target['node_order_topdown']
+            node_order = inp['node_order_topdown']
 
             # Total number of nodes of all trees in the batch
             total_nodes = node_order.shape[0]
@@ -168,11 +168,11 @@ class TreeLstmDecoderComplete(nn.Module):
             # Save predictive hidden states for name clustering
             # h_pred_states = torch.zeros(total_nodes, self.rnn_hidden_size, device=self.device)
 
-            declared_names = [{} for _ in range(len(target['tree_sizes']))]
+            declared_names = [{} for _ in range(len(inp['tree_sizes']))]
 
             # Iterate over the levels of the tree -> top down
             for iteration in range(node_order.max() + 1):
-                loss = self.decode_train(iteration, z, target, h_p, c_p, h_s, c_s, declared_names, individual_losses, accuracies)
+                loss = self.decode_train(iteration, z, inp, h_p, c_p, h_s, c_s, declared_names, individual_losses, accuracies)
                 total_loss += loss
 
             for loss_type in loss_types:
@@ -182,11 +182,11 @@ class TreeLstmDecoderComplete(nn.Module):
                 else:
                     if loss_type == 'RES':
                         # Correct for root node -> is not predicted
-                        accuracies[loss_type] = accuracies[loss_type] / (sum(target['vocabs'] == loss_type) - z.shape[0])
+                        accuracies[loss_type] = accuracies[loss_type] / (sum(inp['vocabs'] == loss_type) - z.shape[0])
                     elif loss_type == 'NAME':
-                        accuracies[loss_type] = accuracies[loss_type] / (sum(target['vocabs'] == loss_type) - sum([len(tree) for tree in declared_names]))
+                        accuracies[loss_type] = accuracies[loss_type] / (sum(inp['vocabs'] == loss_type) - sum([len(tree) for tree in declared_names]))
                     else:
-                        accuracies[loss_type] = accuracies[loss_type] / sum(target['vocabs'] == loss_type)
+                        accuracies[loss_type] = accuracies[loss_type] / sum(inp['vocabs'] == loss_type)
 
             return total_loss, individual_losses, accuracies
 
@@ -642,9 +642,12 @@ class TreeLstmDecoderComplete(nn.Module):
             # print([(k, v[0]) for k,v in declared_names[0].items()], sibling_path_offsets)
 
             for idx, name_idx in enumerate(torch.where(name_indices)[0]):
+
+                amt_declared_names = len([name_state for name_state in declared_names[program_ids[name_idx]].values() if self.is_declared(sibling_path_offsets[name_idx], name_state[0])])
+
                 # If the parent is not a reference or the number of delcarations is 0
                 if ('REF' not in parent_labels[name_idx] \
-                    or len(list(declared_names[program_ids[name_idx]])) == 0) \
+                    or amt_declared_names == 0) \
                     and len(list(declared_names[program_ids[name_idx]])) < self.vocabulary.get_vocab_size('NAME') - 1:
 
                     name_label = len(declared_names[program_ids[name_idx]])
