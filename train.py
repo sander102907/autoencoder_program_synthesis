@@ -10,6 +10,7 @@ import math
 from torch.utils.data import DataLoader, BufferedShuffleDataset
 import sys
 import json
+import pandas as pd
 from model_utils.vocabulary import Vocabulary
 from torch import optim
 from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
@@ -163,7 +164,7 @@ class Trainer:
 
 
     @ex.capture
-    def run(self, num_epochs, save_dir, _run, temperature, top_k, top_p):
+    def run(self, num_epochs, save_dir, dataset_paths, _run, temperature, top_k, top_p):
         if save_dir is not None:
             save_dir = os.path.join(save_dir, str(_run._id))
             os.makedirs(save_dir, exist_ok=True)
@@ -171,7 +172,10 @@ class Trainer:
             
 
         self.model.fit(num_epochs, self.kl_scheduler, self.train_loader, self.val_loader, save_dir)
-        bleu_scores, perc_compiles = self.model.test(self.test_loader, temperature, top_k, top_p, str(_run._id))       
+
+        test_programs = pd.read_csv(dataset_paths['TEST_PROGRAMS'])
+
+        bleu_scores, perc_compiles = self.model.test(self.test_loader, temperature, top_k, top_p, save_folder=str(_run._id), test_programs=test_programs)       
 
         return bleu_scores, perc_compiles
 

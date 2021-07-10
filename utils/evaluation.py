@@ -41,6 +41,8 @@ class Seq2SeqEvaluator:
         compile_folder = os.path.join('output', folder, 'compiled')
         os.makedirs(compile_folder, exist_ok=True)
 
+        print('INFO - Experiment - Calculating percentage compiles..')
+
         subprocess.run('for entry in ' +  f'"{code_folder}"/*' + """
             do
             """ + f"{'#' if not fix_errors else ''} clang-tidy $entry -fix-errors" + """
@@ -80,6 +82,23 @@ class Seq2SeqEvaluator:
 
         self.programs = []
 
+
+    def generations_to_file(self, generations, folder):
+        generations_folder = os.path.join('output', folder, 'generations')
+        os.makedirs(generations_folder, exist_ok=True)
+
+        imports = ['using namespace std;', '#include <vector>', '#include <iostream>', '#include <string>',
+            '#include <cstring>', '#include <queue>', '#include <stdio.h>', '#include <math.h>', '#include <map>', '#include <set>', '#include <stack>']
+
+        for program in generations:
+            idx = len(os.listdir(generations_folder))
+            program_path = os.path.join(generations_folder, f'{idx}.cpp')
+
+            with open(program_path, 'w') as f:
+                f.write(' '.join([self.vocabulary.index2token['ALL'][x.item()] for x in program if x.item() != self.pad_idx and x.item() != self.eos_idx]))
+
+
+            add_includes_usings(program_path, imports)
 
 
 class Tree2TreeEvaluator:
@@ -134,12 +153,15 @@ class Tree2TreeEvaluator:
 
 
 
-    def reconstructions_to_code(self, reconstructions):
+    def reconstructions_to_code(self, reconstructions, add_main=False):
         programs = []
 
         for tree in reconstructions:
             code = ''
-            self._add_main_to_reconstruction(tree)
+
+            if add_main:
+                self._add_main_to_reconstruction(tree)
+
             try:
                 for child in tree.children:
                     code += self.parser.parse_node(child)
@@ -168,7 +190,7 @@ class Tree2TreeEvaluator:
         imports = ['using namespace std;', '#include <vector>', '#include <iostream>', '#include <string>',
             '#include <cstring>', '#include <queue>', '#include <stdio.h>', '#include <math.h>', '#include <map>', '#include <set>', '#include <stack>']
 
-        for idx, program in zip(ids, self.reconstructions_to_code(reconstructions)):
+        for idx, program in zip(ids, self.reconstructions_to_code(reconstructions, add_main=True)):
             program_path = os.path.join(code_folder, f'{idx}.cpp')
 
             with open(program_path, 'w') as f:
@@ -189,11 +211,22 @@ class Tree2TreeEvaluator:
                                    and node.parent.token == self.vocabulary.token2index['RES']['NAME'] 
                                    and node.parent.parent is not None 
                                    and node.parent.parent.token == self.vocabulary.token2index['RES']['FUNCTION_DECL']
-                                   and node.parent.parent.children[-1].token == self.vocabulary.token2index['RES']['COMPOUND_STMT'])
+                                   and node.parent.parent.children[-1].token == self.vocabulary.token2index['RES']['COMPOUND_STMT']
+                                   and node.parent.parent.children[1].token == self.vocabulary.token2index['RES']['TYPE_KIND']
+                                   and node.parent.parent.children[1].children[0].token == self.vocabulary.token2index['RES']['TYPE']
+                                   and node.parent.parent.children[1].children[0].children[0].token == self.vocabulary.token2index['TYPE']['int']
+                                   )
+
+        for name in func_decl_names:
+            if len(findall(reconstruction, filter_=lambda node: node.token == name.token
+                                   and node.parent is not None 
+                                   and node.parent.token == self.vocabulary.token2index['RES']['REF'])) == 0:
+                      name.token = 'main'          
+                      break   
 
 
-        if len(func_decl_names) > 0:
-            func_decl_names[0].token = 'main'
+        # if len(func_decl_names) > 0:
+        #     func_decl_names[0].token = 'main'
 
 
     def add_eval_hypotheses(self, orig_programs, folder, ids):

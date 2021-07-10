@@ -35,7 +35,7 @@ while True:
 
 @ex.config
 def set_config():
-    pretrained_model = 'checkpoints/cluster_latent150/iter7000.tar'
+    pretrained_model = 'checkpoints/cluster_latent150/model.tar'
 
     folder = os.path.dirname(pretrained_model)
     

@@ -17,8 +17,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 @ex.config
 def set_config():
-    pretrained_model = 'checkpoints/1084/iter1000.tar' #'../vastai/168_150latent_seq2seq/model.tar'
-
+    pretrained_model = '../vastai/385_150latent_seq2seq/model.tar' # 'checkpoints/1084/iter1000.tar'
     folder = os.path.dirname(pretrained_model)
     
     for file in os.listdir(folder):
@@ -118,14 +117,19 @@ class Tester:
 
 
     @ex.capture
-    def run(self, save_dir, _run, temperature, top_k, top_p):
+    def run(self, save_dir, _run, temperature, top_k, top_p, latent_dim):
         if save_dir is not None:
             save_dir = os.path.join(save_dir, str(_run._id))
             os.makedirs(save_dir, exist_ok=True)
             self.save_config(save_dir)
             
 
-        bleu_scores, perc_compiles = self.model.test(self.test_loader, temperature, top_k, top_p, save_folder=str(_run._id))       
+        # bleu_scores, perc_compiles = self.model.test(self.test_loader, temperature, top_k, top_p, save_folder=str(_run._id))  
+        self.model.generate(torch.randn([10, latent_dim], device=device), str(_run._id), 1, 40, 0.9)
+
+
+        bleu_scores = 0
+        perc_compiles = 0   
 
         return bleu_scores, perc_compiles
 

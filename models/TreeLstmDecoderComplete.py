@@ -503,7 +503,7 @@ class TreeLstmDecoderComplete(nn.Module):
                     sibling_path_offsets=None, 
                     iteration=0):
 
-        if iteration > 50 and not name_eval_nodes.processing_names:
+        if (iteration > 50 and not name_eval_nodes.processing_names) or iteration > 500:
             print(f'Stopped due to recursion level going over {iteration} iterations')
             return parent_nodes
 
