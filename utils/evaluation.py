@@ -63,15 +63,14 @@ class Seq2SeqEvaluator:
             self.bleu_references.append([[token.item() for token in program if token.item() != self.pad_idx and token.item() != self.eos_idx]])
 
 
-    def reconstructions_to_file(self, reconstructions, folder):
+    def reconstructions_to_file(self, reconstructions, folder, ids):
         code_folder = os.path.join('output', folder, 'code')
         os.makedirs(code_folder, exist_ok=True)
 
         imports = ['using namespace std;', '#include <vector>', '#include <iostream>', '#include <string>',
             '#include <cstring>', '#include <queue>', '#include <stdio.h>', '#include <math.h>', '#include <map>', '#include <set>', '#include <stack>']
 
-        for program in reconstructions:
-            idx = len(os.listdir(code_folder))
+        for idx, program in zip(ids, reconstructions):
             program_path = os.path.join(code_folder, f'{idx}.cpp')
 
             with open(program_path, 'w') as f:
@@ -214,6 +213,7 @@ class Tree2TreeEvaluator:
                                    and node.parent.parent.children[-1].token == self.vocabulary.token2index['RES']['COMPOUND_STMT']
                                    and node.parent.parent.children[1].token == self.vocabulary.token2index['RES']['TYPE_KIND']
                                    and node.parent.parent.children[1].children[0].token == self.vocabulary.token2index['RES']['TYPE']
+                                   and len(node.parent.parent.children[1].children[0].children) > 0
                                    and node.parent.parent.children[1].children[0].children[0].token == self.vocabulary.token2index['TYPE']['int']
                                    )
 
@@ -284,6 +284,30 @@ class Tree2TreeEvaluator:
             self.bleu_references.append([tokens_list])
 
 
+    def generations_to_file(self, generations, folder, plugin_names=False):
+        generations_folder = os.path.join('output', folder, 'generations')
+        os.makedirs(generations_folder, exist_ok=True)
+
+        if plugin_names:
+            for program in generations:
+                self._plugin_generation_names(program)
+            
+
+        imports = ['using namespace std;', '#include <vector>', '#include <iostream>', '#include <string>',
+            '#include <cstring>', '#include <queue>', '#include <stdio.h>', '#include <math.h>', '#include <map>', '#include <set>', '#include <stack>']
+
+
+        for program in self.reconstructions_to_code(generations, add_main=True):
+            idx = len(os.listdir(generations_folder))
+            program_path = os.path.join(generations_folder, f'{idx}.cpp')
+
+            with open(program_path, 'w') as f:
+                f.write(program)
+
+
+            add_includes_usings(program_path, imports)
+
+
     def _plugin_original_names(self, ast, declared_names):
         if 'NAME_' in str(ast.token):
             name = declared_names.get_name(int(ast.token.split('_')[-1]))
@@ -293,6 +317,19 @@ class Tree2TreeEvaluator:
 
         for child in ast.children:
             self._plugin_original_names(child, declared_names)
+
+
+    def _plugin_generation_names(self, ast):
+        if 'NAME_' in str(ast.token):
+            index = int(ast.token.split('_')[-1])
+
+
+
+            if index != -1:
+                ast.token = self.vocabulary.index2token['NAME'][index]
+
+        for child in ast.children:
+            self._plugin_generation_names(child)
 
 
     def _build_ast(self, adj_list, features, vocabs, index=0, parent_node=None):
