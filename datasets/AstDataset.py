@@ -61,9 +61,9 @@ class AstDataset(IterableDataset):
 
                 for ast in file_iterator:
                     if self.get_statistics_only:
-                        nodes, depths, ast_id = self.get_statistics(ast)
+                        nodes, depths, max_siblings, ast_id = self.get_statistics(ast)
                         if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and depths > 0:
-                            yield nodes, depths, ast_id
+                            yield nodes, depths, max_siblings, ast_id
                     else:
                         tree, nodes, ast_id = self.preprocess(ast)
                         if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
@@ -87,9 +87,9 @@ class AstDataset(IterableDataset):
                     # This is not optimal but certainly a speed up compared to just using 1 worker for each file
                     if worker_id - (file_index * workers_per_shared_file) == i % workers_per_shared_file:
                         if self.get_statistics_only:
-                            nodes, depths, ast_id = self.get_statistics(ast)
+                            nodes, depths, max_siblings, ast_id = self.get_statistics(ast)
                             if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and depths > 0:
-                                yield nodes, depths, ast_id
+                                yield nodes, depths, max_siblings, ast_id
                         else:
                             tree, nodes, ast_id = self.preprocess(ast)
                             if (self.max_tree_size == -1 or nodes <= self.max_tree_size) and nodes > 1 and len(tree) > 0:
@@ -119,8 +119,9 @@ class AstDataset(IterableDataset):
         # Get the amount of nodes
         nodes = self.get_amt_nodes(tree)
         depths = self.get_max_depth(tree)
+        max_siblings = self.get_max_siblings(tree)
 
-        return nodes, depths, ast[0]
+        return nodes, depths, max_siblings, ast[0]
 
     def get_amt_nodes(self, root, nodes=0):
         if 'children' in root:
@@ -143,6 +144,20 @@ class AstDataset(IterableDataset):
             return 1 + max(self.get_max_depth(child) for child in root['children'])
         else:
             return 1
+
+
+    def get_max_siblings(self, root):
+        if 'children' in root:
+            count = len(root['children'])
+
+            for child in root['children']:
+                count =  max(self.get_max_siblings(child), count)
+
+            return count
+        else:
+            return 0
+
+
 
     def _label_node_index(self, node, n=0):
         node['index'] = n

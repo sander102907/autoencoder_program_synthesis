@@ -45,7 +45,7 @@ def set_config():
 
 
     # Overwrite config pretrained model
-    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 8})
+    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 64})
 
 
 class Tester:
@@ -124,7 +124,7 @@ class Tester:
 
 
     @ex.capture
-    def run(self, save_dir, _run, dataset_paths, temperature, top_k, top_p):
+    def run(self, save_dir, _run, dataset_paths, temperature, top_k, top_p, latent_dim):
         if save_dir is not None:
             save_dir = os.path.join(save_dir, str(_run._id))
             os.makedirs(save_dir, exist_ok=True)
@@ -132,6 +132,13 @@ class Tester:
         test_programs = pd.read_csv(dataset_paths['TEST_PROGRAMS'])
 
         bleu_scores, perc_compiles = self.model.test(self.test_loader, temperature, top_k, top_p, save_folder=str(_run._id), test_programs=test_programs)
+
+        # self.model.generate(torch.randn([1000, latent_dim], device=device), str(_run._id), 0.7, 40, 0.9)
+        
+        # self.model.interpolate(self.test_loader, 5, str(_run._id), temperature, top_k, top_p)
+
+        # bleu_scores = 0
+        # perc_compiles = 0   
 
         return bleu_scores, perc_compiles
 

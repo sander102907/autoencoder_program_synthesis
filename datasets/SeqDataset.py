@@ -19,7 +19,6 @@ class SeqDataset(Dataset):
         self.max_program_size = max_program_size
         self.device = device
 
-
     def __len__(self):
         return self._total_data
 
@@ -33,10 +32,12 @@ class SeqDataset(Dataset):
         except Exception as e:
             print(e, idx, self._json_file)
 
+
         return {
             'input': inp,
             'target': target,
-            'length': length
+            'length': length,
+            'id': list(program.keys())[0],
         }
 
 

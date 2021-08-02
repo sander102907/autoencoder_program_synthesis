@@ -97,13 +97,22 @@ def get_config():
         'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
         'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
         'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
-        'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
+        'TEST_SMALL': '../data/ast_trees_full_19-06-2021/asts_test_small/',
+        'TEST_MEDIUM': '../data/ast_trees_full_19-06-2021/asts_test_medium/',
+        'TEST_LARGE': '../data/ast_trees_full_19-06-2021/asts_test_large/',
+        'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv',
+        'TEST_PROGRAMS_SMALL': '../data/ast_trees_full_19-06-2021/programs_test_small.csv',
+        'TEST_PROGRAMS_MEDIUM': '../data/ast_trees_full_19-06-2021/programs_test_medium.csv',
+        'TEST_PROGRAMS_LARGE': '../data/ast_trees_full_19-06-2021/programs_test_large.csv',
+        'TEMP': '../data/ast_trees_full_19-06-2021/asts_temp/',
+        'TEMP_PROGRAMS_TRAIN': '../data/ast_trees_full_19-06-2021/temp_programs_train.csv',
 
 
         # For the seq2seq model
         # 'TRAIN': '../data/seq_data/programs_train/',
         # 'VAL': '../data/seq_data/programs_val/',
-        # 'TEST': '../data/seq_data/programs_test/'
+        # 'TEST': '../data/seq_data/programs_test/',
+        # 'TEST_LARGE': '../data/seq_data/programs_test_large/',
     } 
 
 

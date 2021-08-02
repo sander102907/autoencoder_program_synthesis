@@ -23,7 +23,7 @@ class TreePlotter:
 #                 print(re.findall(r'^[a-zA-Z0-9=]*', f'label={label_dict[node.token]}')[0])
 #                 return re.findall(r'^[a-z0-9=]*', f'label={label_dict[node.token]}')[0]
 #             else:
-            return f'label={node.token}'
+            return f'label=x'
 
         UniqueDotExporter(root,
                          nodeattrfunc=get_label #lambda n: f'label="{get_label(n)}" shape={"ellipse" if n.res else "box"}'

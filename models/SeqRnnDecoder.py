@@ -71,7 +71,7 @@ class SeqRnnDecoder(nn.Module):
         self.unk_idx = vocabulary.token2index['ALL']['<unk>']
 
 
-    def forward(self, z, inp=None, temperature=None, top_k=None, top_p=None):
+    def forward(self, z, inp=None, temperature=None, top_k=None, top_p=None, generate=False):
         if inp is not None:
             return self.forward_train(z, inp)
         else:

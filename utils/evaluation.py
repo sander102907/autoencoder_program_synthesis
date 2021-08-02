@@ -18,17 +18,32 @@ class Seq2SeqEvaluator:
     def __init__(self, vocabulary):
         self.bleu_hypotheses = []
         self.bleu_references = []
+        self.ids = []
 
         self.vocabulary = vocabulary
         self.pad_idx = vocabulary.token2index['ALL']['<pad>']
         self.eos_idx = vocabulary.token2index['ALL']['<eos>']
 
-    def calc_bleu_score(self):
+    def calc_bleu_score(self, individual_scores=False):
         self.bleu_4 = corpus_bleu(self.bleu_references, self.bleu_hypotheses)
         self.bleu_3 = corpus_bleu(self.bleu_references, self.bleu_hypotheses, weights=(1/3, 1/3, 1/3, 0))
         self.bleu_2 = corpus_bleu(self.bleu_references, self.bleu_hypotheses, weights=(1/2, 1/2, 0, 0))
         self.bleu_1 = corpus_bleu(self.bleu_references, self.bleu_hypotheses, weights=(1, 0, 0, 0))
 
+        
+        if individual_scores:
+            import pandas as pd
+
+            bleu_scores = []
+            for ref, hyp, id in zip(self.bleu_references, self.bleu_hypotheses, self.ids):
+                bleu_4 = corpus_bleu([ref], [hyp])
+                bleu_scores.append({'id': id, 'bleu_4': bleu_4})
+
+            folder = os.path.join('output', 'bleu_scores')
+            os.makedirs(folder, exist_ok=True)
+
+            pd.DataFrame(bleu_scores).sort_values('bleu_4', ascending=False).to_csv(os.path.join(folder, 'bleu_scores_s2s.csv'), index=False)
+            
         return {
             'bleu_1': self.bleu_1,
             'bleu_2': self.bleu_2,
@@ -53,9 +68,10 @@ class Seq2SeqEvaluator:
         return len(os.listdir(compile_folder)) / len(os.listdir(code_folder))
 
 
-    def add_eval_hypotheses(self, orig_programs):
-        for program in orig_programs:
+    def add_eval_hypotheses(self, orig_programs, ids):
+        for idx, program in zip(ids, orig_programs):
             self.bleu_hypotheses.append([token for token in program if token != self.pad_idx and token != self.eos_idx])
+            self.ids.append(idx)
 
 
     def add_eval_references(self, reconstructions):
@@ -108,6 +124,8 @@ class Tree2TreeEvaluator:
         self.rand_hypotheses = []
         self.rand_references = []
 
+        self.ids = []
+
         self.total_bleu_nodes_ref = 0
         self.total_rand_nodes_ref = 0
 
@@ -123,18 +141,36 @@ class Tree2TreeEvaluator:
 
         self.programs = []
 
-    def calc_bleu_score(self):
+    def calc_bleu_score(self, individual_scores=False):
         self.bleu_4 = corpus_bleu(self.bleu_references, self.bleu_hypotheses)
         self.bleu_3 = corpus_bleu(self.bleu_references, self.bleu_hypotheses, weights=(1/3, 1/3, 1/3, 0))
         self.bleu_2 = corpus_bleu(self.bleu_references, self.bleu_hypotheses, weights=(1/2, 1/2, 0, 0))
         self.bleu_1 = corpus_bleu(self.bleu_references, self.bleu_hypotheses, weights=(1, 0, 0, 0))
 
+        
+        if individual_scores:
+            import pandas as pd
+
+            bleu_scores = []
+            for ref, hyp, id in zip(self.bleu_references, self.bleu_hypotheses, self.ids):
+                bleu_4 = corpus_bleu([ref], [hyp])
+                bleu_scores.append({'id': id, 'bleu_4': bleu_4})
+
+            folder = os.path.join('output', 'bleu_scores')
+            os.makedirs(folder, exist_ok=True)
+
+            pd.DataFrame(bleu_scores).sort_values('bleu_4', ascending=False).to_csv(os.path.join(folder, 'bleu_scores_t2t.csv'), index=False)
+            
+            
         return {
             'bleu_1': self.bleu_1,
             'bleu_2': self.bleu_2,
             'bleu_3': self.bleu_3,
             'bleu_4': self.bleu_4
         }
+
+                
+
 
     def calc_perc_compiles(self, folder, fix_errors=False):
         code_folder = os.path.join('output', folder, 'code')
@@ -253,7 +289,7 @@ class Tree2TreeEvaluator:
                 else:
                     tokens_list.append(value)
 
-
+            self.ids.append(idx)
             self.bleu_hypotheses.append(tokens_list)
 
 
@@ -327,6 +363,9 @@ class Tree2TreeEvaluator:
 
             if index != -1:
                 ast.token = self.vocabulary.index2token['NAME'][index]
+                # Temporary fix, if unwanted token, get token at 100 points later
+                if ast.token in ['main']:
+                    ast.token = self.vocabulary.index2token['NAME'][index + 100]
 
         for child in ast.children:
             self._plugin_generation_names(child)

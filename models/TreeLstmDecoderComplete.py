@@ -121,7 +121,7 @@ class TreeLstmDecoderComplete(nn.Module):
                 self.label_losses[vocab_name] = nn.CrossEntropyLoss(weight=self.loss_weights[vocab_name], reduction='sum')
 
 
-    def forward(self, z, inp=None, names_token2index=None, temperature=None, top_k=None, top_p=None):
+    def forward(self, z, inp=None, names_token2index=None, temperature=None, top_k=None, top_p=None, generate=False):
         """
         @param z: (batch_size, LATENT_DIM) -> latent vector(s)
 
@@ -191,7 +191,7 @@ class TreeLstmDecoderComplete(nn.Module):
             return total_loss, individual_losses, accuracies
 
          # We are evaluating and we cannot use training forcing and we generate tree by tree
-        elif names_token2index is not None:
+        elif names_token2index is not None or generate:
             trees = self.start_decode_eval(z, names_token2index, temperature, top_k, top_p)
             return trees
 

@@ -10,7 +10,8 @@ from utils.TreeNode import Node
 from utils.evaluation import Seq2SeqEvaluator, Tree2TreeEvaluator
 from config.vae_config import ex
 from tqdm import tqdm
-    
+import numpy as np
+import random
 
 class Vae(nn.Module):
     """
@@ -119,13 +120,13 @@ class Vae(nn.Module):
             kl_weight = kl_scheduler.get_weight(current_iteration)
 
             for key in batch.keys():
-                if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length']:
+                if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length', 'id']:
                     batch[key] = batch[key].to(self.device)
 
 
             kl_loss, reconstruction_loss, individual_losses, accuracies = self(batch)
 
-            loss = (kl_loss * kl_weight + reconstruction_loss) / len(batch['input'])
+            loss = (kl_loss * kl_weight + reconstruction_loss)
 
             loss.backward()
 
@@ -185,7 +186,7 @@ class Vae(nn.Module):
                 current_iteration = iterations_passed + batch_index
 
                 for key in batch.keys():
-                    if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length']:
+                    if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length', 'id']:
                         batch[key] = batch[key].to(self.device) 
 
                 z, kl_loss = self.encoder(batch)
@@ -227,7 +228,6 @@ class Vae(nn.Module):
                 iterations += 1
                 reconstructions = self.evaluate(batch, temperature, top_k, top_p)
 
-
                 if self.metrics_helper == MetricsHelperTree2Tree:
                     current_programs = test_programs[test_programs['solutionId'].map(str).isin(batch['ids'])]
                     current_programs['solutionId'] = current_programs['solutionId'].astype(str)
@@ -238,18 +238,18 @@ class Vae(nn.Module):
 
                     evaluator.reconstructions_to_file(reconstructions, save_folder, batch['ids'])
                 else:
-                    evaluator.add_eval_hypotheses(batch['input'].tolist())
+                    evaluator.add_eval_hypotheses(batch['input'].tolist(), batch['id'])
                     evaluator.add_eval_references(reconstructions)
 
-                    evaluator.reconstructions_to_file(reconstructions, save_folder)
+                    evaluator.reconstructions_to_file(reconstructions, save_folder, batch['id'])
 
-                # if iterations > 300:
-                #     break
+                # if iterations >= 500:
+                    # break
 
-        bleu_scores = evaluator.calc_bleu_score()
+        bleu_scores = evaluator.calc_bleu_score(True)
 
-        perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=False)
-        # perc_compiles = 0
+        # perc_compiles = evaluator.calc_perc_compiles(save_folder, fix_errors=False)
+        perc_compiles = 0
 
         return bleu_scores, perc_compiles
 
@@ -263,10 +263,11 @@ class Vae(nn.Module):
         reconstructions = []
 
         for key in batch.keys():
-            if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length']:
+            if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length', 'id']:
                 batch[key] = batch[key].to(self.device)
 
         z, _ = self.encoder(batch)
+        # z = torch.randn([z.shape[0], z.shape[-1]], device=self.device)
 
         if self.metrics_helper == MetricsHelperTree2Tree:
             reconstructions += self.decoder(z, inp=None, names_token2index=batch['declared_names'], temperature=temperature, top_k=top_k, top_p=top_p)
@@ -284,17 +285,53 @@ class Vae(nn.Module):
 
         self.eval()
 
-        with torch.no_grad():
-            output = self.decoder(z, inp=None, temperature=temperature, top_k=top_k, top_p=top_p)
-
         if self.metrics_helper == MetricsHelperTree2Tree:
-            pass
+            for batch in torch.split(z, 32):
+                with torch.no_grad():
+                    output = self.decoder(batch, inp=None, temperature=temperature, top_k=top_k, top_p=top_p, generate=True)
+
+                evaluator = Tree2TreeEvaluator(self.vocabulary)
+                evaluator.generations_to_file(output, save_folder)
         else:
-            evaluator = Seq2SeqEvaluator(self.vocabulary)
-            evaluator.generations_to_file(output, save_folder)
+            for batch in torch.split(z, 5):
+                with torch.no_grad():
+                    output = self.decoder(batch, inp=None, temperature=temperature, top_k=top_k, top_p=top_p)
+
+                evaluator = Seq2SeqEvaluator(self.vocabulary)
+                evaluator.generations_to_file(output, save_folder)
             
 
         return output
+
+
+    def interpolate(self, test_loader, n, save_folder, temperature, top_k, top_p):
+        self.eval()
+
+
+        for batch in test_loader:
+            for key in batch.keys():
+                if key not in ['ids', 'tree_sizes', 'vocabs', 'declared_names', 'length', 'id']:
+                    batch[key] = batch[key].to(self.device)
+
+
+        with torch.no_grad():
+            print(batch)
+            z, _ = self.encoder(batch)
+
+            z = torch.stack([z[0] + (z[1] - z[0]) * t for t in np.linspace(0, 1, n)])
+            interpolate_list = self.decoder(z, inp=None, temperature=temperature, top_k=top_k, top_p=top_p, generate=True)
+
+
+
+        if self.metrics_helper == MetricsHelperTree2Tree:
+            evaluator = Tree2TreeEvaluator(self.vocabulary)
+            evaluator.generations_to_file(interpolate_list, save_folder, plugin_names=True)
+        else:
+            evaluator = Seq2SeqEvaluator(self.vocabulary)
+            evaluator.generations_to_file(interpolate_list, save_folder)
+
+
+
 
 
     def calculate_eval_scores(self, trees, data):

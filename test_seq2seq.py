@@ -15,18 +15,35 @@ from model_utils.metrics_helper import MetricsHelperSeq2Seq
 # Device configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 @ex.config
 def set_config():
-    pretrained_model = '../vastai/385_150latent_seq2seq/model.tar' # 'checkpoints/1084/iter1000.tar'
+    pretrained_model = '../vastai/106_10latent_seq2seq/model.tar' # '../vastai/4&8_500latent_seq2seq/model.tar' 
     folder = os.path.dirname(pretrained_model)
     
     for file in os.listdir(folder):
         if 'config' in file and file.endswith('json'):
             ex.add_config(os.path.join(folder, file))
+            break
+            
+    dataset_paths = {
+        # 'TRAIN': '../data/ast_trees_full_19-06-2021/asts_train/',
+        # 'VAL': '../data/ast_trees_full_19-06-2021/asts_val/',
+        # 'TEST': '../data/ast_trees_full_19-06-2021/asts_test/',
+        # 'TEST_PROGRAMS': '../data/ast_trees_full_19-06-2021/programs_test.csv'
+
+
+        # For the seq2seq model
+        'TRAIN': '../data/seq_data/programs_train/',
+        'VAL': '../data/seq_data/programs_val/',
+        'TEST': '../data/seq_data/programs_test/',
+        'TEST_SMALL': '../data/seq_data/programs_test_small/',
+        'TEST_RECON': '../data/seq_data/programs_test_temp/'
+    } 
 
 
     # Overwrite config pretrained model
-    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 2})
+    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 5, 'dataset_paths': dataset_paths})
 
 
 class Tester:
@@ -87,7 +104,7 @@ class Tester:
 
     @ex.capture
     def get_datasets(self, dataset_paths, max_program_size):
-        test_files = [os.path.join(dataset_paths['TEST'], file) for file in os.listdir(dataset_paths['TEST'])]
+        test_files = [os.path.join(dataset_paths['TEST_RECON'], file) for file in os.listdir(dataset_paths['TEST_RECON'])]
 
         test_datasets = list(map(lambda x : SeqDataset(x, self.vocabulary, max_program_size, device), test_files))
         test_dataset = ConcatDataset(test_datasets)
@@ -125,11 +142,13 @@ class Tester:
             
 
         # bleu_scores, perc_compiles = self.model.test(self.test_loader, temperature, top_k, top_p, save_folder=str(_run._id))  
-        self.model.generate(torch.randn([10, latent_dim], device=device), str(_run._id), 1, 40, 0.9)
-
+        self.model.generate(torch.randn([1000, latent_dim], device=device), str(_run._id), 0.7, 40, 0.9)
+        
+        # self.model.interpolate(self.test_loader, 5, str(_run._id), temperature, top_k, top_p)
 
         bleu_scores = 0
-        perc_compiles = 0   
+        perc_compiles = 0
+ 
 
         return bleu_scores, perc_compiles
 
@@ -138,6 +157,8 @@ class Tester:
 def main(pretrained_model):
     # pretrained model should be given
     assert pretrained_model is not None and os.path.isfile(pretrained_model)
+
+    print(set_config())
 
     tester = Tester()
     bleu_scores, perc_compiles = tester.run()
