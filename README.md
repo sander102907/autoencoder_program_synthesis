@@ -4,7 +4,7 @@ Autoencoder Program Synthesis: A Tree-based VAE-RNN as a tool for generating new
 
 ## Requirements
 1. Make sure to have PyTorch installed: https://pytorch.org/get-started/locally/.
-2. To install this as a package run: ```pip3 install https://github.com/sander102907/cpp_ast_parser```
+2. To install this as a package run: ```https://github.com/sander102907/autoencoder_program_synthesis```
 
 
 ## Set up
