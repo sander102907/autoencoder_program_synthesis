@@ -35,7 +35,7 @@ while True:
 
 @ex.config
 def set_config():
-    pretrained_model = 'checkpoints/cluster_latent150/model.tar'
+    pretrained_model = 'checkpoints/1/model.tar'
 
     folder = os.path.dirname(pretrained_model)
     
@@ -45,7 +45,7 @@ def set_config():
 
 
     # Overwrite config pretrained model
-    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 64})
+    ex.add_config({'pretrained_model': pretrained_model, 'batch_size': 1})
 
 
 class Tester:
@@ -137,8 +137,8 @@ class Tester:
         
         # self.model.interpolate(self.test_loader, 5, str(_run._id), temperature, top_k, top_p)
 
-        # bleu_scores = 0
-        # perc_compiles = 0   
+        bleu_scores = 0
+        perc_compiles = 0   
 
         return bleu_scores, perc_compiles
 

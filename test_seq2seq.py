@@ -18,7 +18,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 @ex.config
 def set_config():
-    pretrained_model = '../vastai/106_10latent_seq2seq/model.tar' # '../vastai/4&8_500latent_seq2seq/model.tar' 
+    pretrained_model = '../vastai/10&9_800latent_seq2seq/model.tar' # '../vastai/4&8_500latent_seq2seq/model.tar' 
     folder = os.path.dirname(pretrained_model)
     
     for file in os.listdir(folder):

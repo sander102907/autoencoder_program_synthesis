@@ -12,7 +12,7 @@ import math
 class AstDataset(IterableDataset):
     "AST trees dataset"
 
-    def __init__(self, data_path, vocabulary, max_tree_size=-1, nr_of_names_to_keep=300, remove_non_res=False, get_statistics_only=False):
+    def __init__(self, data_path, vocabulary, max_tree_size=-1, nr_of_names_to_keep=0, remove_non_res=False, get_statistics_only=False):
         self.max_tree_size = max_tree_size
         self.vocabulary = vocabulary
         self.remove_non_res = remove_non_res
@@ -21,7 +21,7 @@ class AstDataset(IterableDataset):
 
         if os.path.isfile(data_path):
             self.file_paths = [data_path]
-        else:
+        elif len(data_path) > 0:
             self.file_paths = []
             for dirpath, _, files in os.walk(data_path):
                 self.file_paths += [os.path.join(dirpath, file)
@@ -111,6 +111,22 @@ class AstDataset(IterableDataset):
             tree = {}
 
         return tree, nodes, ast[0]
+        
+    def process_ast(self, ast):
+
+        # Get the amount of nodes
+        nodes = self.get_amt_nodes(ast)
+
+        if nodes > 1:
+            # try:
+            tree = self.convert_tree_to_tensors(ast)
+            #except Exception as e:
+            #    tree = {}
+        else:
+            tree = {}
+
+        return tree, nodes
+        
 
     def get_statistics(self, ast):
         # load the JSON of the tree
@@ -201,6 +217,7 @@ class AstDataset(IterableDataset):
 
                     else:
                         feature = declared_names.get_feature(token, decl_line)
+                        
 
                     #     feature = len(oov_name_token2index) + self.nr_of_names_to_keep + self.vocabulary.offsets['NAME']
                     #     oov_name_token2index[token + '_' + str(token['index'])] = feature
@@ -235,7 +252,6 @@ class AstDataset(IterableDataset):
                 else:
                     feature = self.vocabulary.token2index['NON_RES'][node[key]]
                     vocab = 'NON_RES'
-
 
             if vocab == 'NAME' and declared_names.is_declared(node[key]):
                 feature_combined = feature
@@ -371,7 +387,7 @@ class DeclaredNames():
             return self.get_feature(name, line)
         else:
             if line:
-                key = f'{name}_{line}'
+                key = f'{name}||{line}'
             else:
                 key = name
 
@@ -381,36 +397,36 @@ class DeclaredNames():
 
     def get_feature(self, name, line=None):
         if line:
-            key = f'{name}_{line}'
+            key = f'{name}||{line}'
             if key in self.names:
                 return self.names[key]
             else:
                 return self.names[name]
 
         else:
-            name_idx = ['_'.join(k.split('_')[:-1]) for k in self.names.keys()].index(name)
+            name_idx = ['||'.join(k.split('||')[:-1]) for k in self.names.keys()].index(name)
             key = list(self.names.keys())[name_idx]
 
             return self.names[key]
 
     def is_declared(self, name, line=None):
         if line:
-            return f'{name}_{line}' in self.names.keys()
+            return f'{name}||{line}' in self.names.keys()
         else:
-            return name in ['_'.join(k.split('_')[:-1]) for k in self.names.keys()]
+            return name in ['||'.join(k.split('||')[:-1]) if len(k.split('||')) > 1 else k for k in self.names.keys()]
 
     def get_name(self, feature):
         features = list(self.names.values())
 
         if feature in features:
-            return '_'.join(list(self.names.keys())[features.index(feature)].split('_')[:-1])
+            return '||'.join(list(self.names.keys())[features.index(feature)].split('||')[:-1])
         else:
             return -1
 
 
     def get_closest_feature(self, name, line):
-        names_tokens = ['_'.join(k.split('_')[:-1]) for k in self.names.keys()]
-        lines = [int(k.split('_')[-1]) for k in self.names.keys()]
+        names_tokens = ['||'.join(k.split('||')[:-1]) for k in self.names.keys()]
+        lines = [int(k.split('||')[-1]) for k in self.names.keys()]
 
         closest_distance = math.inf
         feature = -1

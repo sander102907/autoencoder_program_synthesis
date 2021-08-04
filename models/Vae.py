@@ -25,10 +25,13 @@ class Vae(nn.Module):
         self.vocabulary = vocabulary
         self.embedding_layers = nn.ModuleDict({})
 
-        self.create_embedding_layers()
-
-        self.encoder = encoder(device, self.embedding_layers)
-        self.decoder = decoder(device, self.embedding_layers, vocabulary, loss_weights)
+        # This only works if we are running a sacred experiment
+        try:
+        	self.create_embedding_layers()
+        	self.encoder = encoder(device, self.embedding_layers)
+        	self.decoder = decoder(device, self.embedding_layers, vocabulary, loss_weights)
+        except Exception:
+            pass
 
         # Store losses -> so we can easily save them
         self.metrics = {}
@@ -267,6 +270,7 @@ class Vae(nn.Module):
                 batch[key] = batch[key].to(self.device)
 
         z, _ = self.encoder(batch)
+        print(z)
         # z = torch.randn([z.shape[0], z.shape[-1]], device=self.device)
 
         if self.metrics_helper == MetricsHelperTree2Tree:
@@ -275,6 +279,25 @@ class Vae(nn.Module):
             reconstructions += self.decoder(z, inp=None, temperature=temperature, top_k=top_k, top_p=top_p)
 
         return reconstructions
+        
+    def encode(self, inp):
+        self.eval()
+        
+        with torch.no_grad():
+        	z, _ = self.encoder(inp)
+
+        return z        
+        
+    def decode(self, z, temperature, top_k, top_p):
+        self.eval()
+        
+        with torch.no_grad():
+        	output = self.decoder(z, inp=None,temperature=temperature, top_k=top_k, top_p=top_p, generate=True)
+        	
+        evaluator = Tree2TreeEvaluator(self.vocabulary)
+        program = evaluator.reconstructions_to_code(output, True)
+        
+        return program
 
 
     def generate(self, z, save_folder, temperature, top_k, top_p):

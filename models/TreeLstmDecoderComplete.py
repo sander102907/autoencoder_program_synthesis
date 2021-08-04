@@ -571,9 +571,9 @@ class TreeLstmDecoderComplete(nn.Module):
 
             # Probability of the node being a reserved c++ token
             p_res = self.sigmoid(res_pred)
+            
 
-
-            # Make sure we do not get infinitely long repeating siblings
+            #Make sure we do not get infinitely long repeating siblings
             # So when we get > 8 consecutive siblings, slowly start reducing p_sib
             for p_sib, sib_path_offset in zip(p_sibling, sibling_path_offsets):
                 if sib_path_offset[-1] > 8:
