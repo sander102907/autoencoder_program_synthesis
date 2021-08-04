@@ -18,8 +18,8 @@ setup(name='Autoencoder Program Synthesis',
           'gensim',
           'pytorch-tree-lstm',
           'numpy',
-          'pymongo'
-          'python-Levenshtein'       
+          'pymongo',
+          'python-Levenshtein',       
       ],
       long_description=open('README.md').read(),
       license='APACHE 2.0'
