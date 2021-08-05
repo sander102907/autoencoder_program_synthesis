@@ -1,5 +1,5 @@
 from torch._C import Value
-from utils.TreeNode import Node
+from autoencoder_program_synthesis.utils.TreeNode import Node
 from nltk.translate.bleu_score import corpus_bleu
 from sklearn.metrics import rand_score, adjusted_rand_score
 from anytree.search import findall
