@@ -9,3 +9,4 @@ pytorch-tree-lstm==0.1.3
 sacred==0.8.2
 sacredboard==0.4.2
 sctokenizer==0.0.5
+icecream==2.1.1
