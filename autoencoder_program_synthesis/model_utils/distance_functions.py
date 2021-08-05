@@ -1,6 +1,6 @@
 import torch.nn.functional as F
 import torch.nn as nn
-from torch.tensor import Tensor
+import torch
 
 
 class CosineDistance(nn.Module):
@@ -16,5 +16,5 @@ class CosineDistance(nn.Module):
         self.dim = dim
         self.eps = eps
 
-    def forward(self, x1: Tensor, x2: Tensor) -> Tensor:
+    def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
         return 1.0 - F.cosine_similarity(x1, x2, dim=self.dim, eps=self.eps)

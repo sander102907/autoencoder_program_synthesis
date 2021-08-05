@@ -1,13 +1,13 @@
 from autoencoder_program_synthesis.models.Vae import Vae
 from autoencoder_program_synthesis.models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
 from autoencoder_program_synthesis.models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
+from autoencoder_program_synthesis.model_utils.vocabulary import Vocabulary
+from autoencoder_program_synthesis.datasets.AstDataset import AstDataset
 from os import path
 import os
 import json
 from cpp_ast_parser.AST_parser import AstParser
 import torch
-from model_utils.vocabulary import Vocabulary
-from datasets.AstDataset import AstDataset
 from anytree.exporter import JsonExporter
 
 class Tree2Tree():
