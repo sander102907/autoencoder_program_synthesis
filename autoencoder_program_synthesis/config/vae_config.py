@@ -6,7 +6,7 @@ DATABASE_NAME = 'Autoencoder_program_synthesis'
 URL = f'mongodb+srv://sander:2FXmtFz8DwSZxFFz@cluster0.a0lmw.mongodb.net/{DATABASE_NAME}?retryWrites=true&w=majority'
 # URL = None
 
-ex = Experiment(EXPERIMENT_NAME)
+ex = Experiment(EXPERIMENT_NAME, save_git_info=False)
 
 ex.observers.append(MongoObserver.create(url=URL, db_name=DATABASE_NAME))
 

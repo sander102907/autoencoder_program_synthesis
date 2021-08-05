@@ -120,7 +120,7 @@ class Tree2Tree():
             return loss_weights
 
 
-    def encode(self, programs: str) -> torch.Tensor:
+    def encode(self, program: str) -> torch.Tensor:
         ast = self.ast_parser.string_to_ast(program)
         ast_json = json.loads(self.ast_exporter.export(ast))
 
