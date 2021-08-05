@@ -13,13 +13,13 @@ Autoencoder Program Synthesis: A Tree-based VAE-RNN as a tool for generating new
 3. Locate the libclang.so library file on your computer and save the path
 
 ## Usage
-Then you can simply import the package in your python code and encode C++ programs to latent vectors and decode latent vectors back to strings. The encoding function takes a program represented as a string and the decoder takes a torch tensor, and some sampling parameters: temperature, top_k and top_p (see this [paper](https://arxiv.org/abs/1904.09751) for more information). The pretrained model that is provided in the set up works with latent vectors of size 150, hence the decoder takes a torch tensor of shape [X, 150] where X can be any number of programs you want to generate. An example of a reconstruction:
+Then you can simply import the package in your python code and encode C++ programs to latent vectors and decode latent vectors back to strings. The encoding function takes a program represented as a string and the decoder takes a torch tensor, and some sampling parameters: temperature, top_k and top_p (see this [paper](https://arxiv.org/abs/1904.09751) for more information). Use temperature=0, top_k=0 and top_p=0 for greedy decoding. The pretrained model that is provided in the set up works with latent vectors of size 150, hence the decoder takes a torch tensor of shape [X, 150] where X can be any number of programs you want to generate. An example of a reconstruction:
 
 ```
 from autoencoder_program_synthesis.t2t_vae import Tree2Tree
 
 libclang_path = '/usr/lib/x86_64-linux-gnu/libclang-6.0.so.1'
-checkpoint path = 'checkpoints/1/'
+checkpoint_path = 'checkpoints/1/'
 
 tree2tree = Tree2Tree(libclang_path, checkpoint_path)
 
