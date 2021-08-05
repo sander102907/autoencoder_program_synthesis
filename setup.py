@@ -19,6 +19,7 @@ setup(name='Autoencoder Program Synthesis',
           'pytorch-tree-lstm',
           'numpy',
           'pymongo',
+          'icecream',
       ],
       long_description=open('README.md').read(),
       license='APACHE 2.0'
