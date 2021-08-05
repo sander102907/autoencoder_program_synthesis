@@ -1,6 +1,6 @@
-from models.Vae import Vae
-from models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
-from models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
+from autoencoder_program_synthesis.models.Vae import Vae
+from autoencoder_program_synthesis.models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
+from autoencoder_program_synthesis.models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
 from os import path
 import os
 import json

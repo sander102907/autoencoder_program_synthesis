@@ -3,12 +3,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from utils.TreeNode import Node
-from utils.Sampling import Sampling
-from model_utils.modules import AddGate, PredictiveHidden, TreeTopologyPred, MultiLayerLSTMCell
-from model_utils.distance_functions import CosineDistance
-from model_utils.adaptive_softmax_pytorch import AdaptiveLogSoftmaxWithLoss
-from config.vae_config import ex
+from autoencoder_program_synthesis.utils.TreeNode import Node
+from autoencoder_program_synthesis.utils.Sampling import Sampling
+from autoencoder_program_synthesis.model_utils.modules import AddGate, PredictiveHidden, TreeTopologyPred, MultiLayerLSTMCell
+from autoencoder_program_synthesis.model_utils.distance_functions import CosineDistance
+from autoencoder_program_synthesis.model_utils.adaptive_softmax_pytorch import AdaptiveLogSoftmaxWithLoss
+from autoencoder_program_synthesis.config.vae_config import ex
 from random import choice
 
 # TODO make flag to combine output of LSTM cell and hidden state for predictive purposes or just take the hidden OR cell state

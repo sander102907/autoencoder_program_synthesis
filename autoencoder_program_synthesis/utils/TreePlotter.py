@@ -1,5 +1,5 @@
 from anytree.exporter import UniqueDotExporter
-from TreeConverter import Node
+from autoencoder_program_synthesis.utils.TreeConverter import Node
 import re
 
 """

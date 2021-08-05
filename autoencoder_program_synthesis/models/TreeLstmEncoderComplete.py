@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from models.tree_lstm import TreeLSTM
-from model_utils.modules import LstmAttention
-from config.vae_config import ex
+from autoencoder_program_synthesis.models.tree_lstm import TreeLSTM
+from autoencoder_program_synthesis.model_utils.modules import LstmAttention
+from autoencoder_program_synthesis.config.vae_config import ex
 
 
 class TreeLstmEncoderComplete(nn.Module):

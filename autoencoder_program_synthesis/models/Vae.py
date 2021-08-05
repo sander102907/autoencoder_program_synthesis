@@ -1,14 +1,14 @@
 import os
 import torch
 import torch.nn as nn
-from models.TreeSeqRnnEncoder import TreeSeqRnnEncoder
-from model_utils.embeddings import EmbeddingLoader
-from model_utils.metrics_helper import MetricsHelperSeq2Seq, MetricsHelperTree2Tree
-from model_utils.earlystopping import EarlyStopping
+from autoencoder_program_synthesis.models.TreeSeqRnnEncoder import TreeSeqRnnEncoder
+from autoencoder_program_synthesis.model_utils.embeddings import EmbeddingLoader
+from autoencoder_program_synthesis.model_utils.metrics_helper import MetricsHelperSeq2Seq, MetricsHelperTree2Tree
+from autoencoder_program_synthesis.model_utils.earlystopping import EarlyStopping
 from nltk.translate.bleu_score import corpus_bleu
-from utils.TreeNode import Node
-from utils.evaluation import Seq2SeqEvaluator, Tree2TreeEvaluator
-from config.vae_config import ex
+from autoencoder_program_synthesis.utils.TreeNode import Node
+from autoencoder_program_synthesis.utils.evaluation import Seq2SeqEvaluator, Tree2TreeEvaluator
+from autoencoder_program_synthesis.config.vae_config import ex
 from tqdm import tqdm
 import numpy as np
 import random

@@ -3,7 +3,7 @@ import csv
 import torch
 import json
 from treelstm import calculate_evaluation_orders
-from utils.TreeLstmUtils import calculate_evaluation_orders_topdown
+from autoencoder_program_synthesis.utils.TreeLstmUtils import calculate_evaluation_orders_topdown
 import os
 import bz2
 import math
