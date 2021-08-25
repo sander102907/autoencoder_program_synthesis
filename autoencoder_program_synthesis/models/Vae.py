@@ -13,6 +13,11 @@ from tqdm import tqdm
 import numpy as np
 import random
 
+import pickle
+import tarfile
+
+from torch.serialization import _load, _open_zipfile_reader
+
 class Vae(nn.Module):
     """
     A Vae model: wrapper for encoder, decoder models with train, evaluate and generate functions
@@ -449,6 +454,7 @@ class Vae(nn.Module):
         }, path)
 
 
+
     def load_model(self, path):
         """
         Load a model save to the encoder, decoder and corresponding optimizer state dicts and load losses
@@ -456,7 +462,10 @@ class Vae(nn.Module):
         @param path: Load a model from the given path
         """
 
-        checkpoint = torch.load(path, map_location=self.device)
+        if '.gz' in path:
+            checkpoint = self.load_model_targz(path)
+        else:
+            checkpoint = torch.load(path, map_location=self.device)
 
         try:
             print(f'INFO - Loading weights from model: {path}')
@@ -477,3 +486,12 @@ class Vae(nn.Module):
             self.metrics = checkpoint['metrics']
         except KeyError:
             print('INFO - skip loading metrics, not available in pretrained model')
+
+
+    def load_model_targz(self, path):
+        tar = tarfile.open(path, "r:gz")
+        member = tar.getmembers()[0]
+        with tar.extractfile(member) as untar:
+            with _open_zipfile_reader(untar) as zipfile:
+                checkpoint = _load(zipfile, self.device, pickle)
+        return checkpoint

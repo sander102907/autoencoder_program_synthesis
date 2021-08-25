@@ -49,7 +49,11 @@ class Tree2Tree():
 
 
     def __init_model(self):
-        pretrained_model_path = os.path.join(self.checkpoint_folder, 'model.tar')
+        if os.path.isfile(os.path.join(self.checkpoint_folder, 'model.tar.gz')):
+            pretrained_model_path = os.path.join(self.checkpoint_folder, 'model.tar.gz')
+        else:    
+            pretrained_model_path = os.path.join(self.checkpoint_folder, 'model.tar')
+
         config_path = os.path.join(self.checkpoint_folder, 'config.json')
 
         with open(config_path, 'r') as f:
