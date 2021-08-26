@@ -11,12 +11,8 @@ from autoencoder_program_synthesis.utils.evaluation import Seq2SeqEvaluator, Tre
 from autoencoder_program_synthesis.config.vae_config import ex
 from tqdm import tqdm
 import numpy as np
-import random
-
-import pickle
-import tarfile
-
-from torch.serialization import _load, _open_zipfile_reader
+import io
+import gzip
 
 class Vae(nn.Module):
     """
@@ -463,7 +459,9 @@ class Vae(nn.Module):
         """
 
         if '.gz' in path:
-            checkpoint = self.load_model_targz(path)
+            with gzip.open(path, 'rb') as f:
+                x = io.BytesIO(f.read())
+                checkpoint = torch.load(x, map_location=self.device)
         else:
             checkpoint = torch.load(path, map_location=self.device)
 
@@ -486,12 +484,3 @@ class Vae(nn.Module):
             self.metrics = checkpoint['metrics']
         except KeyError:
             print('INFO - skip loading metrics, not available in pretrained model')
-
-
-    def load_model_targz(self, path):
-        tar = tarfile.open(path, "r:gz")
-        member = tar.getmembers()[0]
-        with tar.extractfile(member) as untar:
-            with _open_zipfile_reader(untar) as zipfile:
-                checkpoint = _load(zipfile, self.device, pickle)
-        return checkpoint
