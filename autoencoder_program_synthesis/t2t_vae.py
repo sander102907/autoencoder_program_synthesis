@@ -15,7 +15,7 @@ class Tree2Tree():
                  libclang_path: str,
                  checkpoint_folder: os.path):
 
-        assert os.path.isdir(checkpoint_folder), f"Make sure checkpoint_folder: {checkpoint_folder} is a directory containing 'model.tar', 'config.json' and the tokens subfolders."
+        # assert os.path.isdir(checkpoint_folder), f"Make sure checkpoint_folder: {checkpoint_folder} is a directory containing 'model.tar', 'config.json' and the tokens subfolders."
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
