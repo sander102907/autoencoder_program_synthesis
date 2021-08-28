@@ -2,7 +2,7 @@ from autoencoder_program_synthesis.models.Vae import Vae
 from autoencoder_program_synthesis.models.TreeLstmDecoderComplete import TreeLstmDecoderComplete
 from autoencoder_program_synthesis.models.TreeLstmEncoderComplete import TreeLstmEncoderComplete
 from autoencoder_program_synthesis.model_utils.vocabulary import Vocabulary
-from autoencoder_program_synthesis.datasets.AstDataset import AstDataset
+from autoencoder_program_synthesis.datasets.AstDataset import AstDataset, DeclaredNames
 from os import path
 import os
 import json
@@ -137,11 +137,11 @@ class Tree2Tree():
 
         z = self.model.encode(model_inp)
 
-        return z
+        return z, model_inp['declared_names']
 
 
-    def decode(self, z: torch.Tensor, temperature: float, top_k: int, top_p: float) -> list:
-        program = self.model.decode(z, temperature, top_k, top_p)
+    def decode(self, z: torch.Tensor, temperature: float, top_k: int, top_p: float, declared_names: DeclaredNames = None) -> list:
+        program = self.model.decode(z, temperature, top_k, top_p, declared_names)
 
         return program
 

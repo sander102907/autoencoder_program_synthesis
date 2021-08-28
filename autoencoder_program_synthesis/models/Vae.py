@@ -289,14 +289,14 @@ class Vae(nn.Module):
 
         return z        
         
-    def decode(self, z, temperature, top_k, top_p):
+    def decode(self, z, temperature, top_k, top_p, declared_names):
         self.eval()
         
         with torch.no_grad():
         	output = self.decoder(z, inp=None,temperature=temperature, top_k=top_k, top_p=top_p, generate=True)
         	
         evaluator = Tree2TreeEvaluator(self.vocabulary)
-        program = evaluator.reconstructions_to_code(output, True)
+        program = evaluator.reconstructions_to_code(output, True, declared_names)
         
         return program
 

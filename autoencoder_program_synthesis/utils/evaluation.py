@@ -187,8 +187,12 @@ class Tree2TreeEvaluator:
 
 
 
-    def reconstructions_to_code(self, reconstructions, add_main=False):
+    def reconstructions_to_code(self, reconstructions, add_main=False, declared_names=None):
         programs = []
+
+        if declared_names is not None:
+            for program in reconstructions:
+                self._plugin_original_names(program, declared_names)
 
         for tree in reconstructions:
             code = ''
