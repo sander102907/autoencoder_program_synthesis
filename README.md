@@ -25,19 +25,31 @@ checkpoint_path = 'checkpoints/1/'
 tree2tree = Tree2Tree(libclang_path, checkpoint_path)
 
 program = """
-// program to add two numbers using a function
-
-#include <iostream>
-
+#include <bits/stdc++.h>
 using namespace std;
 
-// declaring a function
-int add(int a, int b) {
-    return (a + b);
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(NULL);
+
+    int n;
+    cin >> n;
+    map<int,int> cn;
+    int ans = 0;
+
+    for(int i = 0; i < n; i++) {
+        int x;
+        cin >> x;
+        cn[x]++;
+        ans = max(ans,cn[x]);
+    }
+
+    cout << ans;
+    return 0;
 }"""
 
-z = tree2tree.encode(program)
-reconstructed_program = tree2tree.decode(z, temperature=0.7, top_k=40, top_p=0.9)
+z, decl_names = tree2tree.encode(program)
+reconstructed_program = tree2tree.decode(z, temperature=0.7, top_k=40, top_p=0.9, declared_names=declared_names)
 ```
 
 ## TODO
