@@ -49,7 +49,7 @@ int main() {
 }"""
 
 z, decl_names = tree2tree.encode(program)
-reconstructed_program = tree2tree.decode(z, temperature=0.7, top_k=40, top_p=0.9, declared_names=declared_names)
+reconstructed_program = tree2tree.decode(z, temperature=0.7, top_k=40, top_p=0.9, declared_names=decl_names)
 ```
 
 ## TODO
