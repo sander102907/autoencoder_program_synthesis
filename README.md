@@ -10,7 +10,7 @@ Autoencoder Program Synthesis: A Tree-based VAE-RNN as a tool for generating new
 
 
 ## Set up
-1. Download a pretrained model checkpoint from [here](https://surfdrive.surf.nl/files/index.php/s/4L8v2RaPtEqCxTg/download)
+1. Download a pretrained model checkpoint from [here](https://surfdrive.surf.nl/files/index.php/s/67fYIcTBpRXCoHV/download)
 2. Unzip the contents and place the checkpoint in a folder
 3. Locate the libclang.so library file on your computer and save the path
 
