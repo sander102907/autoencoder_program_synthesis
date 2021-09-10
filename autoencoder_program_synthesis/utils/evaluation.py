@@ -206,6 +206,19 @@ class Tree2TreeEvaluator:
             except Exception as e:
                 pass
 
+
+            try:
+                p = subprocess.Popen(['clang-format'],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        encoding='utf8'
+                        )
+                        
+                code = p.communicate(input=code)[0]
+            except Exception as e:
+                pass
+
             programs.append(code)
 
         return programs
