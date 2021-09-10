@@ -5,11 +5,12 @@ Autoencoder Program Synthesis: A Tree-based VAE-RNN as a tool for generating new
 ## Requirements
 1. Make sure to have PyTorch installed: https://pytorch.org/get-started/locally/.
 2. Make sure to install clang LLVM https://github.com/llvm/llvm-project/releases/tag/llvmorg-12.0.1, for windows make sure to add LLVM to the system path
-3. To install this as a package run: ```pip install git+https://github.com/sander102907/autoencoder_program_synthesis```
+3. Install clang-format for automatic formatting of the generated code, run: ```apt-get install clang-format```
+4. To install this as a package run: ```pip install git+https://github.com/sander102907/autoencoder_program_synthesis```
 
 
 ## Set up
-1. Download a pretrained model checkpoint from [here](https://surfdrive.surf.nl/files/index.php/s/4L8v2RaPtEqCxTg/download)
+1. Download a pretrained model checkpoint from [here](https://surfdrive.surf.nl/files/index.php/s/67fYIcTBpRXCoHV/download)
 2. Unzip the contents and place the checkpoint in a folder
 3. Locate the libclang.so library file on your computer and save the path
 
@@ -25,19 +26,31 @@ checkpoint_path = 'checkpoints/1/'
 tree2tree = Tree2Tree(libclang_path, checkpoint_path)
 
 program = """
-// program to add two numbers using a function
-
-#include <iostream>
-
+#include <bits/stdc++.h>
 using namespace std;
 
-// declaring a function
-int add(int a, int b) {
-    return (a + b);
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(NULL);
+
+    int n;
+    cin >> n;
+    map<int,int> cn;
+    int ans = 0;
+
+    for(int i = 0; i < n; i++) {
+        int x;
+        cin >> x;
+        cn[x]++;
+        ans = max(ans,cn[x]);
+    }
+
+    cout << ans;
+    return 0;
 }"""
 
-z = tree2tree.encode(program)
-reconstructed_program = tree2tree.decode(z, temperature=0.7, top_k=40, top_p=0.9)
+z, decl_names = tree2tree.encode(program)
+reconstructed_program = tree2tree.decode(z, temperature=0.7, top_k=40, top_p=0.9, declared_names=decl_names)
 ```
 
 ## TODO
