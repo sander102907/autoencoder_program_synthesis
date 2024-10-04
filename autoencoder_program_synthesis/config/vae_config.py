@@ -1,10 +1,10 @@
 from sacred import Experiment
 from sacred.observers import MongoObserver
+import os
 
 EXPERIMENT_NAME = 'Experiment'
 DATABASE_NAME = 'Autoencoder_program_synthesis'
-URL = f'mongodb+srv://sander:2FXmtFz8DwSZxFFz@cluster0.a0lmw.mongodb.net/{DATABASE_NAME}?retryWrites=true&w=majority'
-# URL = None
+URL = os.environ.get('MONGO_URL')
 
 ex = Experiment(EXPERIMENT_NAME, save_git_info=False)
 
